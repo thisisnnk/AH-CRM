@@ -8,8 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
-import { Plus, Edit, UserX, UserCheck } from "lucide-react";
+import { Plus, Edit, UserX, UserCheck, Phone, Mail, User, Calendar, Shield } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { format } from "date-fns";
+import { Separator } from "@/components/ui/separator";
 
 export default function ConsolePage() {
   const { user } = useAuth();
@@ -28,10 +30,8 @@ export default function ConsolePage() {
 
   const createEmployee = useMutation({
     mutationFn: async () => {
-      // Save current admin session before signUp replaces it
       const { data: { session: adminSession } } = await supabase.auth.getSession();
 
-      // Create auth user
       const { data: authData, error: authErr } = await supabase.auth.signUp({
         email: form.email,
         password: form.password,
@@ -40,7 +40,6 @@ export default function ConsolePage() {
       if (authErr) throw authErr;
       if (!authData.user) throw new Error("Failed to create user");
 
-      // Restore admin session so subsequent DB calls run as admin
       if (adminSession) {
         await supabase.auth.setSession({
           access_token: adminSession.access_token,
@@ -48,11 +47,9 @@ export default function ConsolePage() {
         });
       }
 
-      // Update profile with whatsapp
       const { error: profileErr } = await supabase.from("profiles").update({ whatsapp: form.whatsapp, name: form.name }).eq("user_id", authData.user.id);
       if (profileErr) throw profileErr;
 
-      // Assign employee role
       const { error: roleErr } = await supabase.from("user_roles").insert({ user_id: authData.user.id, role: "employee" });
       if (roleErr) throw roleErr;
     },
@@ -63,7 +60,6 @@ export default function ConsolePage() {
       queryClient.invalidateQueries({ queryKey: ["all-employees"] });
     },
     onError: (err: any) => {
-      console.error("Create employee error:", err);
       toast({ title: "Error creating employee", description: err.message, variant: "destructive" });
     },
   });
@@ -78,7 +74,6 @@ export default function ConsolePage() {
       toast({ title: "Employee status updated" });
     },
     onError: (err: any) => {
-      console.error("Toggle active error:", err);
       toast({ title: "Error updating status", description: err.message, variant: "destructive" });
     },
   });
@@ -99,15 +94,25 @@ export default function ConsolePage() {
       queryClient.invalidateQueries({ queryKey: ["all-employees"] });
     },
     onError: (err: any) => {
-      console.error("Update employee error:", err);
       toast({ title: "Error updating employee", description: err.message, variant: "destructive" });
     },
   });
 
+  const activeCount = employees.filter((e) => e.is_active).length;
+  const inactiveCount = employees.filter((e) => !e.is_active).length;
+
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Console</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Console</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {employees.length} employee{employees.length !== 1 ? "s" : ""} &nbsp;·&nbsp;
+            <span className="text-success">{activeCount} active</span>
+            {inactiveCount > 0 && <span className="text-destructive"> · {inactiveCount} deactivated</span>}
+          </p>
+        </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button onClick={() => { setEditingUser(null); setForm({ name: "", email: "", password: "", whatsapp: "" }); }}>
@@ -118,11 +123,11 @@ export default function ConsolePage() {
             <DialogHeader>
               <DialogTitle>Create New Employee</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4">
-              <div><Label>Full Name</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-              <div><Label>Email</Label><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
-              <div><Label>Password</Label><Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
-              <div><Label>WhatsApp Number</Label><Input value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} placeholder="+91..." /></div>
+            <div className="space-y-4 pt-2">
+              <div><Label>Full Name</Label><Input className="mt-1" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+              <div><Label>Email</Label><Input className="mt-1" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+              <div><Label>Password</Label><Input className="mt-1" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
+              <div><Label>WhatsApp Number</Label><Input className="mt-1" value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} placeholder="+91..." /></div>
               <Button className="w-full" onClick={() => createEmployee.mutate()} disabled={createEmployee.isPending}>
                 {createEmployee.isPending ? "Creating..." : "Create Employee"}
               </Button>
@@ -133,57 +138,112 @@ export default function ConsolePage() {
 
       {/* Edit Dialog */}
       <Dialog open={!!editingUser} onOpenChange={(open) => { if (!open) setEditingUser(null); }}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Edit Employee</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <div><Label>Full Name</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-            <div><Label>WhatsApp Number</Label><Input value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} /></div>
+          <div className="space-y-4 pt-2">
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <User className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium text-sm">{editingUser?.name}</p>
+                <p className="text-xs text-muted-foreground">{editingUser?.email}</p>
+              </div>
+            </div>
+            <Separator />
+            <div><Label>Full Name</Label><Input className="mt-1" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+            <div><Label>WhatsApp Number</Label><Input className="mt-1" value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} placeholder="+91..." /></div>
+            <div className="text-xs text-muted-foreground bg-muted/40 rounded p-2">
+              Email cannot be changed from here. Contact Supabase to update the auth email.
+            </div>
             <Button className="w-full" onClick={() => updateEmployee.mutate()} disabled={updateEmployee.isPending}>
-              Save Changes
+              {updateEmployee.isPending ? "Saving..." : "Save Changes"}
             </Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      <div className="grid gap-4">
+      {/* Employee Cards */}
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {employees.map((emp) => (
-          <Card key={emp.id}>
-            <CardContent className="p-4 flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <p className="font-medium">{emp.name}</p>
-                  <Badge variant={emp.is_active ? "default" : "destructive"} className="text-xs">
-                    {emp.is_active ? "Active" : "Deactivated"}
-                  </Badge>
+          <Card key={emp.id} className={!emp.is_active ? "opacity-60" : ""}>
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                    <User className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <CardTitle className="text-base leading-tight truncate">{emp.name}</CardTitle>
+                    <Badge
+                      variant={emp.is_active ? "default" : "destructive"}
+                      className="text-xs mt-1"
+                    >
+                      {emp.is_active ? "Active" : "Deactivated"}
+                    </Badge>
+                  </div>
                 </div>
-                <p className="text-sm text-muted-foreground">{emp.email}</p>
-                {emp.whatsapp && <p className="text-xs text-muted-foreground">{emp.whatsapp}</p>}
+                <div className="flex gap-1 shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title="Edit employee"
+                    onClick={() => {
+                      setEditingUser(emp);
+                      setForm({ name: emp.name, email: emp.email, password: "", whatsapp: emp.whatsapp ?? "" });
+                    }}
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title={emp.is_active ? "Deactivate employee" : "Activate employee"}
+                    onClick={() => toggleActive.mutate({ userId: emp.user_id, isActive: emp.is_active ?? true })}
+                  >
+                    {emp.is_active ? <UserX className="h-4 w-4 text-destructive" /> : <UserCheck className="h-4 w-4 text-success" />}
+                  </Button>
+                </div>
               </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => {
-                    setEditingUser(emp);
-                    setForm({ name: emp.name, email: emp.email, password: "", whatsapp: emp.whatsapp ?? "" });
-                  }}
-                >
-                  <Edit className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => toggleActive.mutate({ userId: emp.user_id, isActive: emp.is_active ?? true })}
-                >
-                  {emp.is_active ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
-                </Button>
+            </CardHeader>
+
+            <Separator />
+
+            <CardContent className="pt-3 space-y-2.5">
+              <div className="flex items-center gap-2 text-sm">
+                <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <span className="text-muted-foreground truncate">{emp.email || "—"}</span>
               </div>
+              <div className="flex items-center gap-2 text-sm">
+                <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <span className="text-muted-foreground">{emp.whatsapp || "—"}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <Shield className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <span className="text-muted-foreground capitalize">Employee</span>
+              </div>
+              {emp.created_at && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <span className="text-muted-foreground">
+                    Joined {format(new Date(emp.created_at), "MMM d, yyyy")}
+                  </span>
+                </div>
+              )}
             </CardContent>
           </Card>
         ))}
       </div>
+
+      {employees.length === 0 && (
+        <div className="text-center py-16 text-muted-foreground">
+          No employees yet. Click "Create Employee" to add one.
+        </div>
+      )}
     </div>
   );
 }

@@ -14,6 +14,7 @@ import TasksPage from "./pages/TasksPage";
 import ConsolePage from "./pages/ConsolePage";
 import NotificationsPage from "./pages/NotificationsPage";
 import NotFound from "./pages/NotFound";
+import LeadsActivityPage from "./pages/LeadsActivityPage";
 import { ProtectedLayout, AdminRoute } from "./components/ProtectedLayout";
 
 const queryClient = new QueryClient();
@@ -46,6 +47,7 @@ const App = () => (
               <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/leads" element={<LeadsPage />} />
               <Route path="/leads/:id" element={<LeadDetailPage />} />
+              <Route path="/leads-activity" element={<LeadsActivityPage />} />
               <Route path="/contacts" element={<ContactsPage />} />
               <Route path="/contacts/:id" element={<ContactDetailPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />

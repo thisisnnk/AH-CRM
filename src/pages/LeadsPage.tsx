@@ -8,7 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
-import { CalendarIcon, Plus, Search, Trash2 } from "lucide-react";
+import { CalendarIcon, Filter, Plus, Search, Trash2 } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { format, subDays, endOfDay } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
@@ -26,6 +27,9 @@ export default function LeadsPage() {
 
   const [filter, setFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const [filterSources, setFilterSources] = useState<string[]>([]);
+  const [filterAssignedTos, setFilterAssignedTos] = useState<string[]>([]);
+  const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [dateRange, setDateRange] = useState({ from: subDays(new Date(), 90), to: new Date() });
   const [newLead, setNewLead] = useState({
@@ -212,15 +216,37 @@ export default function LeadsPage() {
     },
   });
 
+  const statusKeys = isAdmin ? ["Open", "On Progress", "Converted", "Lost"] : ["Open", "Follow Up", "Converted", "Lost"];
+
   const filteredLeads = leads.filter((l) => {
     if (filter !== "all") {
       if (isAdmin && l.status !== filter) return false;
       if (!isAdmin && l.badge_stage !== filter) return false;
     }
+    if (filterSources.length > 0 && !filterSources.includes(l.lead_source ?? "")) return false;
+    if (filterAssignedTos.length > 0 && !filterAssignedTos.includes(l.assigned_employee_id ?? "")) return false;
+    if (filterStatuses.length > 0 && !filterStatuses.includes((isAdmin ? l.status : l.badge_stage) ?? "")) return false;
     if (search) {
       const s = search.toLowerCase();
       return l.name.toLowerCase().includes(s) || l.phone.includes(s) || l.destination?.toLowerCase().includes(s);
     }
+    return true;
+  });
+
+  // Cross-filter counts: each filter popover shows counts based on all OTHER active filters
+  const leadsForSource = leads.filter((l) => {
+    if (filterAssignedTos.length > 0 && !filterAssignedTos.includes(l.assigned_employee_id ?? "")) return false;
+    if (filterStatuses.length > 0 && !filterStatuses.includes((isAdmin ? l.status : l.badge_stage) ?? "")) return false;
+    return true;
+  });
+  const leadsForAssigned = leads.filter((l) => {
+    if (filterSources.length > 0 && !filterSources.includes(l.lead_source ?? "")) return false;
+    if (filterStatuses.length > 0 && !filterStatuses.includes((isAdmin ? l.status : l.badge_stage) ?? "")) return false;
+    return true;
+  });
+  const leadsForStatus = leads.filter((l) => {
+    if (filterSources.length > 0 && !filterSources.includes(l.lead_source ?? "")) return false;
+    if (filterAssignedTos.length > 0 && !filterAssignedTos.includes(l.assigned_employee_id ?? "")) return false;
     return true;
   });
 
@@ -307,7 +333,7 @@ export default function LeadsPage() {
       {/* Badge Pills */}
       <div className="flex flex-wrap gap-2 justify-center">
         <button onClick={() => setFilter("all")} className={cn("badge-pill", filter === "all" ? "badge-pill-active" : "badge-pill-inactive")}>
-          All ({leads.length})
+          All ({filteredLeads.length})
         </button>
         {badgeKeys.map((key, i) => (
           <button key={key} onClick={() => setFilter(key)} className={cn("badge-pill", filter === key ? "badge-pill-active" : "badge-pill-inactive")}>
@@ -324,40 +350,114 @@ export default function LeadsPage() {
 
       {/* Table */}
       <div className="overflow-auto rounded-lg border" style={{ maxHeight: "70vh" }}>
-        <table className="w-full text-sm" style={{ minWidth: "1100px" }}>
+        <table className="w-full text-sm" style={{ minWidth: "1600px" }}>
           <thead className="bg-muted/50 sticky top-0 z-10">
             <tr>
-              <th className="text-left py-3 px-4 whitespace-nowrap">Enquiry Date</th>
-              <th className="text-left py-3 px-4 whitespace-nowrap">Source</th>
-              <th className="text-left py-3 px-4 whitespace-nowrap">Itinerary Code</th>
-              <th className="text-left py-3 px-4 whitespace-nowrap">Name</th>
-              <th className="text-left py-3 px-4 whitespace-nowrap">Phone</th>
-              <th className="text-left py-3 px-4 whitespace-nowrap">Destination</th>
-              <th className="text-left py-3 px-4 whitespace-nowrap">Duration</th>
-              {isAdmin && <th className="text-left py-3 px-4 whitespace-nowrap">Assigned To</th>}
-              <th className="text-left py-3 px-4 whitespace-nowrap">Pax</th>
-              <th className="text-left py-3 px-4 whitespace-nowrap">Status</th>
-              <th className="text-left py-3 px-4 whitespace-nowrap">Last Activity</th>
-              {isAdmin && <th className="text-right py-3 px-4 w-16"></th>}
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[160px]">Enquiry Date</th>
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[160px]">
+                <span className="inline-flex items-center gap-1">
+                  Source
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button className={cn("inline-flex items-center justify-center rounded p-0.5 hover:bg-black/10", filterSources.length > 0 ? "text-primary" : "text-muted-foreground")} onClick={(e) => e.stopPropagation()}>
+                        <Filter className="h-3.5 w-3.5" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-52 p-2" align="start" onClick={(e) => e.stopPropagation()}>
+                      <p className="text-xs font-semibold text-muted-foreground mb-2 px-1">Filter by Source</p>
+                      <div className="space-y-0.5">
+                        {(["Instagram", "Website", "Referral", "Office Direct Lead"] as const).map((src) => (
+                          <label key={src} className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted cursor-pointer text-sm font-normal">
+                            <Checkbox checked={filterSources.includes(src)} onCheckedChange={(checked) => setFilterSources(checked ? [...filterSources, src] : filterSources.filter((v) => v !== src))} />
+                            <span className="flex-1">{src}</span>
+                            <span className="text-muted-foreground text-xs">{leadsForSource.filter((l) => l.lead_source === src).length}</span>
+                          </label>
+                        ))}
+                      </div>
+                      {filterSources.length > 0 && <button onClick={() => setFilterSources([])} className="mt-2 w-full text-center text-xs text-muted-foreground hover:text-foreground py-1 border-t">Clear</button>}
+                    </PopoverContent>
+                  </Popover>
+                </span>
+              </th>
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[200px]">Itinerary Code</th>
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[160px]">Name</th>
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[160px]">Phone</th>
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[180px]">Destination</th>
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[200px]">Duration</th>
+              {isAdmin && (
+                <th className="text-center py-3 px-6 whitespace-nowrap min-w-[180px]">
+                  <span className="inline-flex items-center gap-1">
+                    Assigned To
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <button className={cn("inline-flex items-center justify-center rounded p-0.5 hover:bg-black/10", filterAssignedTos.length > 0 ? "text-primary" : "text-muted-foreground")} onClick={(e) => e.stopPropagation()}>
+                          <Filter className="h-3.5 w-3.5" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-56 p-2" align="start" onClick={(e) => e.stopPropagation()}>
+                        <p className="text-xs font-semibold text-muted-foreground mb-2 px-1">Filter by Assigned To</p>
+                        <div className="space-y-0.5">
+                          {employees.map((emp) => (
+                            <label key={emp.user_id} className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted cursor-pointer text-sm font-normal">
+                              <Checkbox checked={filterAssignedTos.includes(emp.user_id)} onCheckedChange={(checked) => setFilterAssignedTos(checked ? [...filterAssignedTos, emp.user_id] : filterAssignedTos.filter((v) => v !== emp.user_id))} />
+                              <span className="flex-1">{emp.name}</span>
+                              <span className="text-muted-foreground text-xs">{leadsForAssigned.filter((l) => l.assigned_employee_id === emp.user_id).length}</span>
+                            </label>
+                          ))}
+                        </div>
+                        {filterAssignedTos.length > 0 && <button onClick={() => setFilterAssignedTos([])} className="mt-2 w-full text-center text-xs text-muted-foreground hover:text-foreground py-1 border-t">Clear</button>}
+                      </PopoverContent>
+                    </Popover>
+                  </span>
+                </th>
+              )}
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[100px]">Pax</th>
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[130px]">
+                <span className="inline-flex items-center gap-1">
+                  Status
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button className={cn("inline-flex items-center justify-center rounded p-0.5 hover:bg-black/10", filterStatuses.length > 0 ? "text-primary" : "text-muted-foreground")} onClick={(e) => e.stopPropagation()}>
+                        <Filter className="h-3.5 w-3.5" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-48 p-2" align="start" onClick={(e) => e.stopPropagation()}>
+                      <p className="text-xs font-semibold text-muted-foreground mb-2 px-1">Filter by Status</p>
+                      <div className="space-y-0.5">
+                        {statusKeys.map((st) => (
+                          <label key={st} className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted cursor-pointer text-sm font-normal">
+                            <Checkbox checked={filterStatuses.includes(st)} onCheckedChange={(checked) => setFilterStatuses(checked ? [...filterStatuses, st] : filterStatuses.filter((v) => v !== st))} />
+                            <span className="flex-1">{st}</span>
+                            <span className="text-muted-foreground text-xs">{leadsForStatus.filter((l) => (isAdmin ? l.status : l.badge_stage) === st).length}</span>
+                          </label>
+                        ))}
+                      </div>
+                      {filterStatuses.length > 0 && <button onClick={() => setFilterStatuses([])} className="mt-2 w-full text-center text-xs text-muted-foreground hover:text-foreground py-1 border-t">Clear</button>}
+                    </PopoverContent>
+                  </Popover>
+                </span>
+              </th>
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[160px]">Last Activity</th>
+              {isAdmin && <th className="text-center py-3 px-6 min-w-[60px]"></th>}
             </tr>
           </thead>
           <tbody>
             {filteredLeads.map((lead) => (
               <tr key={lead.id} className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => navigate(`/leads/${lead.id}`)}>
-                <td className="py-3 px-4 whitespace-nowrap">{lead.enquiry_date ? format(new Date(lead.enquiry_date), "MMM d, yyyy") : "—"}</td>
-                <td className="py-3 px-4 whitespace-nowrap">{lead.lead_source ?? "—"}</td>
-                <td className="py-3 px-4 whitespace-nowrap">{lead.itinerary_code ?? "—"}</td>
-                <td className="py-3 px-4 font-medium whitespace-nowrap">{lead.name}</td>
-                <td className="py-3 px-4 whitespace-nowrap">{lead.phone}</td>
-                <td className="py-3 px-4 whitespace-nowrap">{lead.destination ?? "—"}</td>
-                <td className="py-3 px-4 whitespace-nowrap">{lead.trip_duration ?? "—"}</td>
+                <td className="py-3 px-6 whitespace-nowrap">{lead.enquiry_date ? format(new Date(lead.enquiry_date), "MMM d, yyyy") : "—"}</td>
+                <td className="py-3 px-6 whitespace-nowrap">{lead.lead_source ?? "—"}</td>
+                <td className="py-3 px-6 whitespace-nowrap">{lead.itinerary_code ?? "—"}</td>
+                <td className="py-3 px-6 font-medium whitespace-nowrap">{lead.name}</td>
+                <td className="py-3 px-6 whitespace-nowrap">{lead.phone}</td>
+                <td className="py-3 px-6 whitespace-nowrap">{lead.destination ?? "—"}</td>
+                <td className="py-3 px-6 whitespace-nowrap">{lead.trip_duration ?? "—"}</td>
                 {isAdmin && (
-                  <td className="py-3 px-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                  <td className="py-3 px-6 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     <Select
                       value={lead.assigned_employee_id ?? ""}
                       onValueChange={(v) => reassignLead.mutate({ id: lead.id, employeeId: v })}
                     >
-                      <SelectTrigger className="h-8 text-xs w-32">
+                      <SelectTrigger className="h-8 text-xs w-36">
                         <SelectValue>{employees.find((e) => e.user_id === lead.assigned_employee_id)?.name ?? "Unassigned"}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
@@ -366,8 +466,8 @@ export default function LeadsPage() {
                     </Select>
                   </td>
                 )}
-                <td className="py-3 px-4 whitespace-nowrap">{lead.travelers ?? "—"}</td>
-                <td className="py-3 px-4 whitespace-nowrap">
+                <td className="py-3 px-6 whitespace-nowrap">{lead.travelers ?? "—"}</td>
+                <td className="py-3 px-6 whitespace-nowrap">
                   <span className={cn(
                     "px-2 py-1 rounded-full text-xs font-medium",
                     (isAdmin ? lead.status : lead.badge_stage) === "Open" && "status-open",
@@ -379,9 +479,9 @@ export default function LeadsPage() {
                     {isAdmin ? lead.status : lead.badge_stage}
                   </span>
                 </td>
-                <td className="py-3 px-4 whitespace-nowrap text-muted-foreground text-xs">{lead.last_activity_at ? format(new Date(lead.last_activity_at), "MMM d, yyyy") : "—"}</td>
+                <td className="py-3 px-6 whitespace-nowrap text-muted-foreground text-xs">{lead.last_activity_at ? format(new Date(lead.last_activity_at), "MMM d, yyyy") : "—"}</td>
                 {isAdmin && (
-                  <td className="py-3 px-4 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                  <td className="py-3 px-6 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => {
                       if (confirm("Are you sure you want to delete this lead?")) {
                         deleteLead.mutate(lead.id);

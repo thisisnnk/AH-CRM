@@ -10,6 +10,7 @@ import {
   LogOut,
   ChevronLeft,
   Menu,
+  Activity,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import {
@@ -28,16 +29,18 @@ import { Separator } from "@/components/ui/separator";
 
 const adminNav = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Console", url: "/console", icon: Settings },
   { title: "Leads", url: "/leads", icon: Users },
+  { title: "Leads Activity", url: "/leads-activity", icon: Activity },
   { title: "Contacts", url: "/contacts", icon: Contact },
   { title: "Tasks", url: "/tasks", icon: ListTodo },
   { title: "Notifications", url: "/notifications", icon: Bell },
+  { title: "Console", url: "/console", icon: Settings },
 ];
 
 const employeeNav = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Leads", url: "/leads", icon: Users },
+  { title: "Leads Activity", url: "/leads-activity", icon: Activity },
   { title: "Contacts", url: "/contacts", icon: Contact },
   { title: "Notifications", url: "/notifications", icon: Bell },
 ];

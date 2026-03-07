@@ -152,7 +152,7 @@ export default function LeadDetailPage() {
   const [personalForm, setPersonalForm] = useState({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "" });
   const [isEditingLeadInfo, setIsEditingLeadInfo] = useState(false);
   const [isSavingLeadInfo, setIsSavingLeadInfo] = useState(false);
-  const [leadInfoForm, setLeadInfoForm] = useState({ lead_source: "", status: "", itinerary_code: "", destination: "", travelers: "", trip_duration: "" });
+  const [leadInfoForm, setLeadInfoForm] = useState({ lead_source: "", status: "", itinerary_code: "", destination: "", travelers: "", trip_duration: "", tour_category: "" });
 
   // ── Upload helper with real progress ──
   const uploadFile = async (file: File, folder: string, setProgress: (n: number) => void): Promise<string> => {
@@ -421,7 +421,7 @@ export default function LeadDetailPage() {
   };
 
   const startEditLeadInfo = () => {
-    setLeadInfoForm({ lead_source: lead.lead_source || "", status: lead.status || "Open", itinerary_code: lead.itinerary_code || "", destination: lead.destination || "", travelers: String(lead.travelers || ""), trip_duration: lead.trip_duration || "" });
+    setLeadInfoForm({ lead_source: lead.lead_source || "", status: lead.status || "Open", itinerary_code: lead.itinerary_code || "", destination: lead.destination || "", travelers: String(lead.travelers || ""), trip_duration: lead.trip_duration || "", tour_category: lead.tour_category || "" });
     setIsEditingLeadInfo(true);
   };
   const saveLeadInfo = () => {
@@ -433,6 +433,7 @@ export default function LeadDetailPage() {
       destination: leadInfoForm.destination || null,
       travelers: leadInfoForm.travelers ? parseInt(leadInfoForm.travelers) : null,
       trip_duration: leadInfoForm.trip_duration || null,
+      tour_category: leadInfoForm.tour_category || null,
     };
     if (leadInfoForm.status === "Lost" || leadInfoForm.status === "Converted") {
       updates.badge_stage = leadInfoForm.status;
@@ -599,6 +600,19 @@ export default function LeadDetailPage() {
           <div>
             <Label className="text-muted-foreground text-xs">Duration</Label>
             {isEditingLeadInfo ? <Input value={leadInfoForm.trip_duration} onChange={(e) => setLeadInfoForm({ ...leadInfoForm, trip_duration: e.target.value })} className="h-8 mt-1" placeholder="e.g. 5 Days / 4 Nights" /> : <p className="mt-1 text-sm">{lead.trip_duration || "—"}</p>}
+          </div>
+          <div>
+            <Label className="text-muted-foreground text-xs">Tour Category</Label>
+            {isEditingLeadInfo ? (
+              <Select value={leadInfoForm.tour_category} onValueChange={(v) => setLeadInfoForm({ ...leadInfoForm, tour_category: v })}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Select category" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Cruise">Cruise</SelectItem>
+                  <SelectItem value="Domestic Tour">Domestic Tour</SelectItem>
+                  <SelectItem value="International Tour">International Tour</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : <p className="mt-1 text-sm">{lead.tour_category || "—"}</p>}
           </div>
         </CardContent>
       </Card>
