@@ -10,11 +10,12 @@ import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { Plus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { format, subDays } from "date-fns";
+import { format, subDays, endOfDay } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { sendNotification } from "@/utils/notificationHelper";
 
 const statusOptions = ["Open", "On Progress", "Lost", "Converted"] as const;
 const sourceOptions = ["Instagram", "Website", "Referral", "Office Direct Lead"] as const;
@@ -39,16 +40,22 @@ export default function LeadsPage() {
     queryFn: async () => {
       let query = supabase
         .from("leads")
-        .select("*, profiles:assigned_employee_id(name)")
+        .select("*")
         .gte("created_at", dateRange.from.toISOString())
-        .lte("created_at", dateRange.to.toISOString())
+        .lte("created_at", endOfDay(dateRange.to).toISOString())
         .order("created_at", { ascending: false });
 
       if (!isAdmin && user) {
         query = query.eq("assigned_employee_id", user.id);
       }
 
-      const { data } = await query;
+      const { data, error } = await query;
+      if (error) {
+        console.error("Leads fetch error:", error);
+        toast({ title: "Error loading leads", description: error.message, variant: "destructive" });
+        return [];
+      }
+      console.log("Leads fetched:", data?.length ?? 0, "records");
       return data ?? [];
     },
     enabled: !!user,
@@ -62,9 +69,63 @@ export default function LeadsPage() {
     },
   });
 
+  // Generate client ID in AH-YYYY-MM-NNNN format
+  const generateClientId = async (): Promise<string> => {
+    const now = new Date();
+    const yr = now.getFullYear().toString();
+    const mo = (now.getMonth() + 1).toString().padStart(2, "0");
+    const prefix = `AH-${yr}-${mo}-`;
+
+    // Try server-side RPC first, fall back to client-side generation
+    try {
+      const { data: rpcId, error: rpcErr } = await supabase.rpc("generate_client_id");
+      if (!rpcErr && rpcId) return rpcId;
+    } catch {
+      // RPC not available, generate client-side
+    }
+
+    // Fallback: query max existing client_id for this month
+    const { data: existing } = await supabase
+      .from("leads")
+      .select("client_id")
+      .like("client_id", `${prefix}%`)
+      .order("client_id", { ascending: false })
+      .limit(1);
+
+    let nextSeq = 1;
+    if (existing && existing.length > 0 && existing[0].client_id) {
+      const lastNum = parseInt(existing[0].client_id.slice(-4), 10);
+      if (!isNaN(lastNum)) nextSeq = lastNum + 1;
+    }
+
+    return `${prefix}${nextSeq.toString().padStart(4, "0")}`;
+  };
+
   const createLead = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from("leads").insert({
+      // 1. Generate client ID
+      const clientId = await generateClientId();
+
+      // 2. Generate contact ID and create contact
+      const { data: contactIdVal, error: rpcError } = await supabase.rpc("generate_contact_id");
+      if (rpcError) throw rpcError;
+
+      const { data: contactData, error: contactErr } = await supabase.from("contacts").insert({
+        contact_id: contactIdVal,
+        name: newLead.name,
+        phone: newLead.phone,
+        whatsapp: newLead.whatsapp || null,
+        email: newLead.email || null,
+        city: newLead.city || null,
+        state: newLead.state || null,
+        country: newLead.country || null,
+      }).select("id").single();
+      if (contactErr) throw contactErr;
+
+      // 3. Create lead linked to the contact
+      const { error: leadErr } = await supabase.from("leads").insert({
+        client_id: clientId,
+        contact_id: contactData.id,
         name: newLead.name,
         phone: newLead.phone,
         whatsapp: newLead.whatsapp || null,
@@ -75,33 +136,72 @@ export default function LeadsPage() {
         destination: newLead.destination || null,
         travelers: newLead.travelers ? parseInt(newLead.travelers) : null,
         trip_duration: newLead.trip_duration || null,
-        lead_source: newLead.lead_source || null,
-        assigned_employee_id: newLead.assigned_employee_id || user?.id,
+        lead_source: newLead.lead_source,
+        assigned_employee_id: newLead.assigned_employee_id,
       });
-      if (error) throw error;
+      if (leadErr) throw leadErr;
+
+      // 4. Notify assigned employee
+      if (newLead.assigned_employee_id) {
+        await sendNotification({
+          recipientId: newLead.assigned_employee_id,
+          type: "lead_assigned",
+          message: `New lead "${newLead.name}" has been assigned to you`,
+          leadId: undefined, // We don't have the lead ID from the insert
+        });
+      }
     },
     onSuccess: () => {
-      toast({ title: "Lead created" });
+      toast({ title: "Lead created", description: "Contact was also created automatically." });
       setCreateOpen(false);
+      setNewLead({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "", destination: "", travelers: "", trip_duration: "", lead_source: "", assigned_employee_id: "" });
+      // Refresh date range to include the new lead
+      setDateRange((prev) => ({ ...prev, to: new Date() }));
       queryClient.invalidateQueries({ queryKey: ["leads"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },
-    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+    onError: (err: any) => {
+      console.error("Create lead error:", err);
+      toast({ title: "Error creating lead", description: err.message, variant: "destructive" });
+    },
   });
 
   const updateStatus = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      await supabase.from("leads").update({ status }).eq("id", id);
+      const { error } = await supabase.from("leads").update({ status }).eq("id", id);
+      if (error) throw error;
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["leads"] }),
+    onError: (err: any) => {
+      console.error("Update lead status error:", err);
+      toast({ title: "Error updating status", description: err.message, variant: "destructive" });
+    },
   });
 
   const reassignLead = useMutation({
     mutationFn: async ({ id, employeeId }: { id: string; employeeId: string }) => {
-      await supabase.from("leads").update({ assigned_employee_id: employeeId }).eq("id", id);
+      const { error } = await supabase.from("leads").update({ assigned_employee_id: employeeId }).eq("id", id);
+      if (error) throw error;
+
+      // Get lead name for notification message
+      const { data: leadData } = await supabase.from("leads").select("name").eq("id", id).single();
+      const leadName = leadData?.name ?? "a lead";
+
+      // Notify new employee
+      await sendNotification({
+        recipientId: employeeId,
+        type: "lead_reassigned",
+        message: `Lead "${leadName}" has been reassigned to you`,
+        leadId: id,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["leads"] });
       toast({ title: "Lead reassigned" });
+    },
+    onError: (err: any) => {
+      console.error("Reassign lead error:", err);
+      toast({ title: "Error reassigning lead", description: err.message, variant: "destructive" });
     },
   });
 
@@ -119,17 +219,17 @@ export default function LeadsPage() {
 
   const badgeCounts = isAdmin
     ? {
-        Open: leads.filter((l) => l.status === "Open").length,
-        "On Progress": leads.filter((l) => l.status === "On Progress").length,
-        Converted: leads.filter((l) => l.status === "Converted").length,
-        Lost: leads.filter((l) => l.status === "Lost").length,
-      }
+      Open: leads.filter((l) => l.status === "Open").length,
+      "On Progress": leads.filter((l) => l.status === "On Progress").length,
+      Converted: leads.filter((l) => l.status === "Converted").length,
+      Lost: leads.filter((l) => l.status === "Lost").length,
+    }
     : {
-        Open: leads.filter((l) => l.badge_stage === "Open").length,
-        "Follow Up": leads.filter((l) => l.badge_stage === "Follow Up").length,
-        Converted: leads.filter((l) => l.badge_stage === "Converted").length,
-        Lost: leads.filter((l) => l.badge_stage === "Lost").length,
-      };
+      Open: leads.filter((l) => l.badge_stage === "Open").length,
+      "Follow Up": leads.filter((l) => l.badge_stage === "Follow Up").length,
+      Converted: leads.filter((l) => l.badge_stage === "Converted").length,
+      Lost: leads.filter((l) => l.badge_stage === "Lost").length,
+    };
 
   const badgeKeys = isAdmin ? ["Open", "On Progress", "Converted", "Lost"] : ["Open", "Follow Up", "Converted", "Lost"];
   const badgeIcons = ["🔵", "🔄", "✅", "❌"];
@@ -174,21 +274,21 @@ export default function LeadsPage() {
                   <div><Label>Travelers</Label><Input type="number" value={newLead.travelers} onChange={(e) => setNewLead({ ...newLead, travelers: e.target.value })} /></div>
                   <div><Label>Trip Duration</Label><Input value={newLead.trip_duration} onChange={(e) => setNewLead({ ...newLead, trip_duration: e.target.value })} /></div>
                   <div>
-                    <Label>Source</Label>
+                    <Label>Source *</Label>
                     <Select value={newLead.lead_source} onValueChange={(v) => setNewLead({ ...newLead, lead_source: v })}>
                       <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                       <SelectContent>{sourceOptions.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
                   <div>
-                    <Label>Assign To</Label>
+                    <Label>Assign To *</Label>
                     <Select value={newLead.assigned_employee_id} onValueChange={(v) => setNewLead({ ...newLead, assigned_employee_id: v })}>
                       <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                       <SelectContent>{employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
                 </div>
-                <Button className="w-full mt-4" onClick={() => createLead.mutate()} disabled={!newLead.name || !newLead.phone || createLead.isPending}>
+                <Button className="w-full mt-4" onClick={() => createLead.mutate()} disabled={!newLead.name || !newLead.phone || !newLead.lead_source || !newLead.assigned_employee_id || createLead.isPending}>
                   Create Lead
                 </Button>
               </DialogContent>
@@ -246,7 +346,7 @@ export default function LeadsPage() {
                       onValueChange={(v) => reassignLead.mutate({ id: lead.id, employeeId: v })}
                     >
                       <SelectTrigger className="h-8 text-xs w-32">
-                        <SelectValue>{(lead as any).profiles?.name ?? "Unassigned"}</SelectValue>
+                        <SelectValue>{employees.find((e) => e.user_id === lead.assigned_employee_id)?.name ?? "Unassigned"}</SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}

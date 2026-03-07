@@ -16,6 +16,7 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { Separator } from "@/components/ui/separator";
+import { sendNotification } from "@/utils/notificationHelper";
 
 export default function TasksPage() {
   const { user } = useAuth();
@@ -71,26 +72,41 @@ export default function TasksPage() {
   const assignIncoming = useMutation({
     mutationFn: async ({ incomingId, employeeId, name, phone }: { incomingId: string; employeeId: string; name: string; phone: string }) => {
       // Create official lead
-      await supabase.from("leads").insert({
+      const { error: leadErr } = await supabase.from("leads").insert({
         name,
         phone,
         assigned_employee_id: employeeId,
         lead_source: "Telegram Bot",
       });
+      if (leadErr) throw leadErr;
       // Mark incoming as assigned
-      await supabase.from("incoming_leads").update({ status: "Assigned" }).eq("id", incomingId);
+      const { error: updateErr } = await supabase.from("incoming_leads").update({ status: "Assigned" }).eq("id", incomingId);
+      if (updateErr) throw updateErr;
+
+      // Notify assigned employee
+      await sendNotification({
+        recipientId: employeeId,
+        type: "lead_assigned",
+        message: `New lead "${name}" has been assigned to you`,
+      });
     },
     onSuccess: () => {
       toast({ title: "Lead assigned" });
       queryClient.invalidateQueries({ queryKey: ["incoming-leads"] });
       queryClient.invalidateQueries({ queryKey: ["leads"] });
     },
+    onError: (err: any) => {
+      console.error("Assign incoming lead error:", err);
+      toast({ title: "Error assigning lead", description: err.message, variant: "destructive" });
+    },
   });
 
   const createTask = useMutation({
     mutationFn: async () => {
-      if (!user || !taskForm.followUpDate || !taskForm.leadId || !taskForm.assignedTo) return;
-      await supabase.from("tasks").insert({
+      if (!user || !taskForm.followUpDate || !taskForm.leadId || !taskForm.assignedTo) {
+        throw new Error("Please fill in all required fields");
+      }
+      const { error } = await supabase.from("tasks").insert({
         description: taskForm.description,
         follow_up_date: taskForm.followUpDate.toISOString(),
         notes: taskForm.notes || null,
@@ -98,10 +114,28 @@ export default function TasksPage() {
         assigned_employee_id: taskForm.assignedTo,
         created_by: user.id,
       });
+      if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       toast({ title: "Task created" });
       setTaskForm({ description: "", followUpDate: undefined, notes: "", assignedTo: "", leadId: "" });
+
+      // Notify assigned employee
+      const assignedEmp = taskForm.assignedTo;
+      if (assignedEmp) {
+        const leadName = leads.find((l) => l.id === taskForm.leadId)?.name ?? "a lead";
+        await sendNotification({
+          recipientId: assignedEmp,
+          type: "task_assigned",
+          message: `New task assigned to you for lead "${leadName}": ${taskForm.description}`,
+          leadId: taskForm.leadId,
+          isTask: true,
+        });
+      }
+    },
+    onError: (err: any) => {
+      console.error("Create task error:", err);
+      toast({ title: "Error creating task", description: err.message, variant: "destructive" });
     },
   });
 

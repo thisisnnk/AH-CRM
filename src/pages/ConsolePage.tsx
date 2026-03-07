@@ -28,7 +28,10 @@ export default function ConsolePage() {
 
   const createEmployee = useMutation({
     mutationFn: async () => {
-      // Create auth user via supabase admin (we'll use edge function for this)
+      // Save current admin session before signUp replaces it
+      const { data: { session: adminSession } } = await supabase.auth.getSession();
+
+      // Create auth user
       const { data: authData, error: authErr } = await supabase.auth.signUp({
         email: form.email,
         password: form.password,
@@ -37,11 +40,21 @@ export default function ConsolePage() {
       if (authErr) throw authErr;
       if (!authData.user) throw new Error("Failed to create user");
 
+      // Restore admin session so subsequent DB calls run as admin
+      if (adminSession) {
+        await supabase.auth.setSession({
+          access_token: adminSession.access_token,
+          refresh_token: adminSession.refresh_token,
+        });
+      }
+
       // Update profile with whatsapp
-      await supabase.from("profiles").update({ whatsapp: form.whatsapp, name: form.name }).eq("user_id", authData.user.id);
+      const { error: profileErr } = await supabase.from("profiles").update({ whatsapp: form.whatsapp, name: form.name }).eq("user_id", authData.user.id);
+      if (profileErr) throw profileErr;
 
       // Assign employee role
-      await supabase.from("user_roles").insert({ user_id: authData.user.id, role: "employee" });
+      const { error: roleErr } = await supabase.from("user_roles").insert({ user_id: authData.user.id, role: "employee" });
+      if (roleErr) throw roleErr;
     },
     onSuccess: () => {
       toast({ title: "Employee created successfully" });
@@ -50,33 +63,44 @@ export default function ConsolePage() {
       queryClient.invalidateQueries({ queryKey: ["all-employees"] });
     },
     onError: (err: any) => {
-      toast({ title: "Error", description: err.message, variant: "destructive" });
+      console.error("Create employee error:", err);
+      toast({ title: "Error creating employee", description: err.message, variant: "destructive" });
     },
   });
 
   const toggleActive = useMutation({
     mutationFn: async ({ userId, isActive }: { userId: string; isActive: boolean }) => {
-      await supabase.from("profiles").update({ is_active: !isActive }).eq("user_id", userId);
+      const { error } = await supabase.from("profiles").update({ is_active: !isActive }).eq("user_id", userId);
+      if (error) throw error;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["all-employees"] });
       toast({ title: "Employee status updated" });
+    },
+    onError: (err: any) => {
+      console.error("Toggle active error:", err);
+      toast({ title: "Error updating status", description: err.message, variant: "destructive" });
     },
   });
 
   const updateEmployee = useMutation({
     mutationFn: async () => {
       if (!editingUser) return;
-      await supabase.from("profiles").update({
+      const { error } = await supabase.from("profiles").update({
         name: form.name,
         whatsapp: form.whatsapp,
       }).eq("user_id", editingUser.user_id);
+      if (error) throw error;
     },
     onSuccess: () => {
       toast({ title: "Employee updated" });
       setEditingUser(null);
       setForm({ name: "", email: "", password: "", whatsapp: "" });
       queryClient.invalidateQueries({ queryKey: ["all-employees"] });
+    },
+    onError: (err: any) => {
+      console.error("Update employee error:", err);
+      toast({ title: "Error updating employee", description: err.message, variant: "destructive" });
     },
   });
 

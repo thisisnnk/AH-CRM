@@ -20,7 +20,13 @@ const queryClient = new QueryClient();
 
 function RootRedirect() {
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        Loading Adventure Holidays CRM...
+      </div>
+    );
+  }
   return user ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />;
 }
 

@@ -23,14 +23,20 @@ export default function ContactsPage() {
   const { data: contacts = [] } = useQuery({
     queryKey: ["contacts"],
     queryFn: async () => {
-      const { data } = await supabase.from("contacts").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase.from("contacts").select("*").order("created_at", { ascending: false });
+      if (error) {
+        console.error("Contacts fetch error:", error);
+        toast({ title: "Error loading contacts", description: error.message, variant: "destructive" });
+        return [];
+      }
       return data ?? [];
     },
   });
 
   const createContact = useMutation({
     mutationFn: async () => {
-      const { data: contactId } = await supabase.rpc("generate_contact_id");
+      const { data: contactId, error: rpcError } = await supabase.rpc("generate_contact_id");
+      if (rpcError) throw rpcError;
       const { error } = await supabase.from("contacts").insert({
         contact_id: contactId,
         name: form.name,
@@ -49,7 +55,10 @@ export default function ContactsPage() {
       setForm({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "" });
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },
-    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+    onError: (err: any) => {
+      console.error("Create contact error:", err);
+      toast({ title: "Error creating contact", description: err.message, variant: "destructive" });
+    },
   });
 
   const filtered = contacts.filter((c) => {
