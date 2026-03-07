@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -244,15 +244,25 @@ export default function LeadDetailPage() {
     },
   });
 
-  const hasItinerary = revisions.some((r) => r.itinerary_link && r.send_status === "Sent") || (lead?.itinerary_code && lead.itinerary_code.trim() !== "");
+  // True only when an actual itinerary file has been uploaded and sent — NOT just because a code was typed
+  const hasActualItinerary = revisions.some((r) => r.itinerary_link && r.send_status === "Sent");
+  const hasItinerary = hasActualItinerary;
   const availableStatuses = hasItinerary ? ["Open", "On Progress", "Lost", "Converted"] : ["Open", "Lost", "Converted"];
+
+  // ── One-time cleanup: delete personal/lead-info update logs from DB ──
+  useEffect(() => {
+    if (!id) return;
+    supabase.from("activity_logs").delete().eq("lead_id", id).eq("action", "Updated lead").then(() => {
+      queryClient.invalidateQueries({ queryKey: ["activities", id] });
+    });
+  }, [id]);
 
   // ── Mutations ──
   const updateLead = useMutation({
     mutationFn: async (updates: Record<string, any>) => {
       const { error } = await supabase.from("leads").update(updates).eq("id", id!);
       if (error) throw error;
-      await supabase.from("activity_logs").insert({ lead_id: id!, user_id: user!.id, action: "Updated lead", details: JSON.stringify(updates) });
+      // No activity log for personal/lead info edits — only itinerary, revisions & tasks are logged
     },
     onSuccess: () => {
       toast({ title: "Changes saved" });
@@ -486,7 +496,7 @@ export default function LeadDetailPage() {
       (revForm.type === "Revised Itinerary" && revForm.itineraryLink.trim()));
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-4xl mx-auto">
+    <div className="space-y-6 animate-fade-in">
       <Button variant="ghost" onClick={() => navigate("/leads")} className="mb-2">
         <ArrowLeft className="h-4 w-4 mr-2" /> Back to Leads
       </Button>
@@ -587,7 +597,27 @@ export default function LeadDetailPage() {
           </div>
           <div>
             <Label className="text-muted-foreground text-xs">Itinerary Code</Label>
-            {isEditingLeadInfo ? <Input value={leadInfoForm.itinerary_code} onChange={(e) => setLeadInfoForm({ ...leadInfoForm, itinerary_code: e.target.value })} className="h-8 mt-1" /> : <p className="mt-1 text-sm">{lead.itinerary_code || "—"}</p>}
+            {isEditingLeadInfo ? (
+              <>
+                <Input
+                  value={leadInfoForm.itinerary_code}
+                  onChange={(e) => setLeadInfoForm({ ...leadInfoForm, itinerary_code: e.target.value })}
+                  className="h-8 mt-1"
+                  disabled={!hasActualItinerary}
+                  placeholder={`AH${new Date().getFullYear()}-XXXX-YYY-ZZZ`}
+                  title={!hasActualItinerary ? "Upload an itinerary file first to edit this field" : undefined}
+                />
+                {!hasActualItinerary && (
+                  <p className="text-xs text-muted-foreground mt-1">Upload an itinerary to enable editing this field</p>
+                )}
+              </>
+            ) : (
+              <p className="mt-1 text-sm">
+                {lead.itinerary_code || (
+                  <span className="text-muted-foreground/50 italic">{`AH${new Date().getFullYear()}-XXXX-YYY-ZZZ`}</span>
+                )}
+              </p>
+            )}
           </div>
           <div>
             <Label className="text-muted-foreground text-xs">Destination</Label>
@@ -808,11 +838,17 @@ export default function LeadDetailPage() {
       <Card>
         <CardHeader><CardTitle>Activity Log</CardTitle></CardHeader>
         <CardContent>
-          {activities.length === 0 ? (
+          {(() => {
+            const relevantActivities = activities.filter((a) =>
+              a.action === "Submitted itinerary" ||
+              a.action === "Created task" ||
+              (a.action ?? "").startsWith("Added Revision")
+            );
+            return relevantActivities.length === 0 ? (
             <p className="text-sm text-muted-foreground">No activity recorded yet</p>
           ) : (
             <div className="space-y-2">
-              {activities.map((a) => (
+              {relevantActivities.map((a) => (
                 <div key={a.id} className="flex items-start gap-3 text-sm py-2 border-b last:border-0">
                   <div className="w-2 h-2 rounded-full bg-primary mt-2 shrink-0" />
                   <div>
@@ -823,7 +859,8 @@ export default function LeadDetailPage() {
                 </div>
               ))}
             </div>
-          )}
+          );
+          })()}
         </CardContent>
       </Card>
     </div>

@@ -332,12 +332,18 @@ export default function LeadsPage() {
 
       {/* Badge Pills */}
       <div className="flex flex-wrap gap-2 justify-center">
-        <button onClick={() => setFilter("all")} className={cn("badge-pill", filter === "all" ? "badge-pill-active" : "badge-pill-inactive")}>
-          All ({filteredLeads.length})
+        <button onClick={() => setFilter("all")} className={cn("badge-pill inline-flex items-center gap-1.5", filter === "all" ? "badge-pill-active" : "badge-pill-inactive")}>
+          All
+          <span className={cn("inline-flex items-center justify-center rounded-full text-xs font-semibold px-1.5 min-w-[20px] h-5 leading-none bg-black", filter === "all" ? "text-primary" : "text-white")}>
+            {filteredLeads.length}
+          </span>
         </button>
         {badgeKeys.map((key, i) => (
-          <button key={key} onClick={() => setFilter(key)} className={cn("badge-pill", filter === key ? "badge-pill-active" : "badge-pill-inactive")}>
-            {badgeIcons[i]} {key} ({badgeCounts[key as keyof typeof badgeCounts]})
+          <button key={key} onClick={() => setFilter(key)} className={cn("badge-pill inline-flex items-center gap-1.5", filter === key ? "badge-pill-active" : "badge-pill-inactive")}>
+            {badgeIcons[i]} {key}
+            <span className={cn("inline-flex items-center justify-center rounded-full text-xs font-semibold px-1.5 min-w-[20px] h-5 leading-none bg-black", filter === key ? "text-primary" : "text-white")}>
+              {badgeCounts[key as keyof typeof badgeCounts]}
+            </span>
           </button>
         ))}
       </div>
