@@ -107,12 +107,9 @@ export default function LeadsPage() {
       // 1. Generate client ID
       const clientId = await generateClientId();
 
-      // 2. Generate contact ID and create contact
-      const { data: contactIdVal, error: rpcError } = await supabase.rpc("generate_contact_id");
-      if (rpcError) throw rpcError;
-
+      // 2. Create contact using the same client ID
       const { data: contactData, error: contactErr } = await supabase.from("contacts").insert({
-        contact_id: contactIdVal,
+        contact_id: clientId,
         name: newLead.name,
         phone: newLead.phone,
         whatsapp: newLead.whatsapp || null,
@@ -170,6 +167,11 @@ export default function LeadsPage() {
 
   const deleteLead = useMutation({
     mutationFn: async (id: string) => {
+      // Null out lead_id in notifications to break FK, then delete dependent records
+      await (supabase as any).from("notifications").update({ lead_id: null }).eq("lead_id", id);
+      await supabase.from("tasks").delete().eq("lead_id", id);
+      await supabase.from("activity_logs").delete().eq("lead_id", id);
+      await supabase.from("revisions").delete().eq("lead_id", id);
       const { error } = await supabase.from("leads").delete().eq("id", id);
       if (error) throw error;
     },
@@ -321,32 +323,36 @@ export default function LeadsPage() {
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50">
+      <div className="overflow-auto rounded-lg border" style={{ maxHeight: "70vh" }}>
+        <table className="w-full text-sm" style={{ minWidth: "1100px" }}>
+          <thead className="bg-muted/50 sticky top-0 z-10">
             <tr>
-              {isAdmin && <th className="text-left py-3 px-4">Client ID</th>}
-              <th className="text-left py-3 px-4">Name</th>
-              <th className="text-left py-3 px-4">Phone</th>
-              <th className="text-left py-3 px-4">Destination</th>
-              <th className="text-left py-3 px-4">Pax</th>
-              {isAdmin && <th className="text-left py-3 px-4">Employee</th>}
-              {!isAdmin && <th className="text-left py-3 px-4">Itinerary Code</th>}
-              {!isAdmin && <th className="text-left py-3 px-4">Duration</th>}
-              <th className="text-left py-3 px-4">Status</th>
+              <th className="text-left py-3 px-4 whitespace-nowrap">Enquiry Date</th>
+              <th className="text-left py-3 px-4 whitespace-nowrap">Source</th>
+              <th className="text-left py-3 px-4 whitespace-nowrap">Itinerary Code</th>
+              <th className="text-left py-3 px-4 whitespace-nowrap">Name</th>
+              <th className="text-left py-3 px-4 whitespace-nowrap">Phone</th>
+              <th className="text-left py-3 px-4 whitespace-nowrap">Destination</th>
+              <th className="text-left py-3 px-4 whitespace-nowrap">Duration</th>
+              {isAdmin && <th className="text-left py-3 px-4 whitespace-nowrap">Assigned To</th>}
+              <th className="text-left py-3 px-4 whitespace-nowrap">Pax</th>
+              <th className="text-left py-3 px-4 whitespace-nowrap">Status</th>
+              <th className="text-left py-3 px-4 whitespace-nowrap">Last Activity</th>
               {isAdmin && <th className="text-right py-3 px-4 w-16"></th>}
             </tr>
           </thead>
           <tbody>
             {filteredLeads.map((lead) => (
               <tr key={lead.id} className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => navigate(`/leads/${lead.id}`)}>
-                {isAdmin && <td className="py-3 px-4 text-muted-foreground">{lead.client_id ?? "—"}</td>}
-                <td className="py-3 px-4 font-medium">{lead.name}</td>
-                <td className="py-3 px-4">{lead.phone}</td>
-                <td className="py-3 px-4">{lead.destination ?? "—"}</td>
-                <td className="py-3 px-4">{lead.travelers ?? "—"}</td>
+                <td className="py-3 px-4 whitespace-nowrap">{lead.enquiry_date ? format(new Date(lead.enquiry_date), "MMM d, yyyy") : "—"}</td>
+                <td className="py-3 px-4 whitespace-nowrap">{lead.lead_source ?? "—"}</td>
+                <td className="py-3 px-4 whitespace-nowrap">{lead.itinerary_code ?? "—"}</td>
+                <td className="py-3 px-4 font-medium whitespace-nowrap">{lead.name}</td>
+                <td className="py-3 px-4 whitespace-nowrap">{lead.phone}</td>
+                <td className="py-3 px-4 whitespace-nowrap">{lead.destination ?? "—"}</td>
+                <td className="py-3 px-4 whitespace-nowrap">{lead.trip_duration ?? "—"}</td>
                 {isAdmin && (
-                  <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                  <td className="py-3 px-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     <Select
                       value={lead.assigned_employee_id ?? ""}
                       onValueChange={(v) => reassignLead.mutate({ id: lead.id, employeeId: v })}
@@ -360,9 +366,8 @@ export default function LeadsPage() {
                     </Select>
                   </td>
                 )}
-                {!isAdmin && <td className="py-3 px-4">{lead.itinerary_code ?? "—"}</td>}
-                {!isAdmin && <td className="py-3 px-4">{lead.trip_duration ?? "—"}</td>}
-                <td className="py-3 px-4">
+                <td className="py-3 px-4 whitespace-nowrap">{lead.travelers ?? "—"}</td>
+                <td className="py-3 px-4 whitespace-nowrap">
                   <span className={cn(
                     "px-2 py-1 rounded-full text-xs font-medium",
                     (isAdmin ? lead.status : lead.badge_stage) === "Open" && "status-open",
@@ -374,8 +379,9 @@ export default function LeadsPage() {
                     {isAdmin ? lead.status : lead.badge_stage}
                   </span>
                 </td>
+                <td className="py-3 px-4 whitespace-nowrap text-muted-foreground text-xs">{lead.last_activity_at ? format(new Date(lead.last_activity_at), "MMM d, yyyy") : "—"}</td>
                 {isAdmin && (
-                  <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                  <td className="py-3 px-4 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => {
                       if (confirm("Are you sure you want to delete this lead?")) {
                         deleteLead.mutate(lead.id);
@@ -388,10 +394,10 @@ export default function LeadsPage() {
               </tr>
             ))}
             {leadsLoading && (
-              <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">Loading leads...</td></tr>
+              <tr><td colSpan={12} className="py-8 text-center text-muted-foreground">Loading leads...</td></tr>
             )}
             {!leadsLoading && filteredLeads.length === 0 && (
-              <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">No leads found</td></tr>
+              <tr><td colSpan={12} className="py-8 text-center text-muted-foreground">No leads found</td></tr>
             )}
           </tbody>
         </table>
