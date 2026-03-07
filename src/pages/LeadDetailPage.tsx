@@ -146,6 +146,14 @@ export default function LeadDetailPage() {
   // Task form state
   const [taskForm, setTaskForm] = useState({ description: "", followUpDate: undefined as Date | undefined, notes: "", assignedTo: "" });
 
+  // Edit mode state
+  const [isEditingPersonal, setIsEditingPersonal] = useState(false);
+  const [isSavingPersonal, setIsSavingPersonal] = useState(false);
+  const [personalForm, setPersonalForm] = useState({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "" });
+  const [isEditingLeadInfo, setIsEditingLeadInfo] = useState(false);
+  const [isSavingLeadInfo, setIsSavingLeadInfo] = useState(false);
+  const [leadInfoForm, setLeadInfoForm] = useState({ lead_source: "", status: "", itinerary_code: "", destination: "", travelers: "", trip_duration: "" });
+
   // ── Upload helper with real progress ──
   const uploadFile = async (file: File, folder: string, setProgress: (n: number) => void): Promise<string> => {
     const filePath = `${folder}/${id}/${Date.now()}_${file.name}`;
@@ -247,7 +255,9 @@ export default function LeadDetailPage() {
       await supabase.from("activity_logs").insert({ lead_id: id!, user_id: user!.id, action: "Updated lead", details: JSON.stringify(updates) });
     },
     onSuccess: () => {
+      toast({ title: "Changes saved" });
       queryClient.invalidateQueries({ queryKey: ["lead", id] });
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
       queryClient.invalidateQueries({ queryKey: ["activities", id] });
     },
     onError: (err: any) => {
@@ -394,6 +404,45 @@ export default function LeadDetailPage() {
 
   if (!lead) return <div className="py-8 text-center text-muted-foreground">Loading...</div>;
 
+  // ── Edit handlers ──
+  const startEditPersonal = () => {
+    setPersonalForm({ name: lead.name, phone: lead.phone, whatsapp: lead.whatsapp || "", email: lead.email || "", city: lead.city || "", state: lead.state || "", country: lead.country || "" });
+    setIsEditingPersonal(true);
+  };
+  const savePersonal = () => {
+    setIsSavingPersonal(true);
+    updateLead.mutate(
+      { name: personalForm.name, phone: personalForm.phone, whatsapp: personalForm.whatsapp || null, email: personalForm.email || null, city: personalForm.city || null, state: personalForm.state || null, country: personalForm.country || null },
+      {
+        onSuccess: () => { setIsEditingPersonal(false); setIsSavingPersonal(false); },
+        onError: () => setIsSavingPersonal(false),
+      }
+    );
+  };
+
+  const startEditLeadInfo = () => {
+    setLeadInfoForm({ lead_source: lead.lead_source || "", status: lead.status || "Open", itinerary_code: lead.itinerary_code || "", destination: lead.destination || "", travelers: String(lead.travelers || ""), trip_duration: lead.trip_duration || "" });
+    setIsEditingLeadInfo(true);
+  };
+  const saveLeadInfo = () => {
+    setIsSavingLeadInfo(true);
+    const updates: Record<string, any> = {
+      lead_source: leadInfoForm.lead_source,
+      status: leadInfoForm.status,
+      itinerary_code: leadInfoForm.itinerary_code || null,
+      destination: leadInfoForm.destination || null,
+      travelers: leadInfoForm.travelers ? parseInt(leadInfoForm.travelers) : null,
+      trip_duration: leadInfoForm.trip_duration || null,
+    };
+    if (leadInfoForm.status === "Lost" || leadInfoForm.status === "Converted") {
+      updates.badge_stage = leadInfoForm.status;
+    }
+    updateLead.mutate(updates, {
+      onSuccess: () => { setIsEditingLeadInfo(false); setIsSavingLeadInfo(false); },
+      onError: () => setIsSavingLeadInfo(false),
+    });
+  };
+
   // ── Handlers ──
   const handleItineraryUpload = async () => {
     if (!itineraryFile) return;
@@ -443,29 +492,48 @@ export default function LeadDetailPage() {
 
       {/* Personal Details */}
       <Card>
-        <CardHeader><CardTitle>Personal Details</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Personal Details</CardTitle>
+            {!isEditingPersonal ? (
+              <Button variant="outline" size="sm" onClick={startEditPersonal}>Edit</Button>
+            ) : (
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setIsEditingPersonal(false)} disabled={isSavingPersonal}>Cancel</Button>
+                <Button size="sm" onClick={savePersonal} disabled={isSavingPersonal}>{isSavingPersonal ? "Saving..." : "Save"}</Button>
+              </div>
+            )}
+          </div>
+        </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div><Label className="text-muted-foreground text-xs">Name</Label>
-            <Input defaultValue={lead.name} onBlur={(e) => { if (e.target.value !== lead.name) updateLead.mutate({ name: e.target.value }) }} className="h-8 mt-1" />
+          <div>
+            <Label className="text-muted-foreground text-xs">Name</Label>
+            {isEditingPersonal ? <Input value={personalForm.name} onChange={(e) => setPersonalForm({ ...personalForm, name: e.target.value })} className="h-8 mt-1" /> : <p className="mt-1 text-sm">{lead.name || "—"}</p>}
           </div>
-          <div><Label className="text-muted-foreground text-xs">Phone</Label>
-            <Input defaultValue={lead.phone} onBlur={(e) => { if (e.target.value !== lead.phone) updateLead.mutate({ phone: e.target.value }) }} className="h-8 mt-1" />
+          <div>
+            <Label className="text-muted-foreground text-xs">Phone</Label>
+            {isEditingPersonal ? <Input value={personalForm.phone} onChange={(e) => setPersonalForm({ ...personalForm, phone: e.target.value })} className="h-8 mt-1" /> : <p className="mt-1 text-sm">{lead.phone || "—"}</p>}
           </div>
-          <div><Label className="text-muted-foreground text-xs">WhatsApp</Label>
-            <Input defaultValue={lead.whatsapp || ""} onBlur={(e) => { if (e.target.value !== lead.whatsapp) updateLead.mutate({ whatsapp: e.target.value }) }} className="h-8 mt-1" />
+          <div>
+            <Label className="text-muted-foreground text-xs">WhatsApp</Label>
+            {isEditingPersonal ? <Input value={personalForm.whatsapp} onChange={(e) => setPersonalForm({ ...personalForm, whatsapp: e.target.value })} className="h-8 mt-1" /> : <p className="mt-1 text-sm">{lead.whatsapp || "—"}</p>}
           </div>
-          <div><Label className="text-muted-foreground text-xs">Email</Label>
-            <Input defaultValue={lead.email || ""} onBlur={(e) => { if (e.target.value !== lead.email) updateLead.mutate({ email: e.target.value }) }} className="h-8 mt-1" />
+          <div>
+            <Label className="text-muted-foreground text-xs">Email</Label>
+            {isEditingPersonal ? <Input value={personalForm.email} onChange={(e) => setPersonalForm({ ...personalForm, email: e.target.value })} className="h-8 mt-1" /> : <p className="mt-1 text-sm">{lead.email || "—"}</p>}
           </div>
           <div className="col-span-1 md:col-span-2 grid grid-cols-3 gap-2">
-            <div><Label className="text-muted-foreground text-xs">City</Label>
-              <Input defaultValue={lead.city || ""} onBlur={(e) => { if (e.target.value !== lead.city) updateLead.mutate({ city: e.target.value }) }} className="h-8 mt-1" placeholder="City" />
+            <div>
+              <Label className="text-muted-foreground text-xs">City</Label>
+              {isEditingPersonal ? <Input value={personalForm.city} onChange={(e) => setPersonalForm({ ...personalForm, city: e.target.value })} className="h-8 mt-1" placeholder="City" /> : <p className="mt-1 text-sm">{lead.city || "—"}</p>}
             </div>
-            <div><Label className="text-muted-foreground text-xs">State</Label>
-              <Input defaultValue={lead.state || ""} onBlur={(e) => { if (e.target.value !== lead.state) updateLead.mutate({ state: e.target.value }) }} className="h-8 mt-1" placeholder="State" />
+            <div>
+              <Label className="text-muted-foreground text-xs">State</Label>
+              {isEditingPersonal ? <Input value={personalForm.state} onChange={(e) => setPersonalForm({ ...personalForm, state: e.target.value })} className="h-8 mt-1" placeholder="State" /> : <p className="mt-1 text-sm">{lead.state || "—"}</p>}
             </div>
-            <div><Label className="text-muted-foreground text-xs">Country</Label>
-              <Input defaultValue={lead.country || ""} onBlur={(e) => { if (e.target.value !== lead.country) updateLead.mutate({ country: e.target.value }) }} className="h-8 mt-1" placeholder="Country" />
+            <div>
+              <Label className="text-muted-foreground text-xs">Country</Label>
+              {isEditingPersonal ? <Input value={personalForm.country} onChange={(e) => setPersonalForm({ ...personalForm, country: e.target.value })} className="h-8 mt-1" placeholder="Country" /> : <p className="mt-1 text-sm">{lead.country || "—"}</p>}
             </div>
           </div>
         </CardContent>
@@ -473,37 +541,64 @@ export default function LeadDetailPage() {
 
       {/* Lead Information */}
       <Card>
-        <CardHeader><CardTitle>Lead Information</CardTitle></CardHeader>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Lead Information</CardTitle>
+            {!isEditingLeadInfo ? (
+              <Button variant="outline" size="sm" onClick={startEditLeadInfo}>Edit</Button>
+            ) : (
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setIsEditingLeadInfo(false)} disabled={isSavingLeadInfo}>Cancel</Button>
+                <Button size="sm" onClick={saveLeadInfo} disabled={isSavingLeadInfo}>{isSavingLeadInfo ? "Saving..." : "Save"}</Button>
+              </div>
+            )}
+          </div>
+        </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <Label className="text-muted-foreground text-xs">Lead Source</Label>
-            <Select value={lead.lead_source ?? ""} onValueChange={(v) => updateLead.mutate({ lead_source: v })}>
-              <SelectTrigger><SelectValue placeholder="Select source" /></SelectTrigger>
-              <SelectContent>
-                {["Instagram", "Website", "Referral", "Office Direct Lead"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            {isEditingLeadInfo ? (
+              <Select value={leadInfoForm.lead_source} onValueChange={(v) => setLeadInfoForm({ ...leadInfoForm, lead_source: v })}>
+                <SelectTrigger><SelectValue placeholder="Select source" /></SelectTrigger>
+                <SelectContent>
+                  {["Instagram", "Website", "Referral", "Office Direct Lead"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            ) : <p className="mt-1 text-sm">{lead.lead_source || "—"}</p>}
           </div>
-          <div><Label className="text-muted-foreground text-xs">Enquiry Date</Label><p>{lead.enquiry_date ? format(new Date(lead.enquiry_date), "MMM d, yyyy") : "—"}</p></div>
+          <div>
+            <Label className="text-muted-foreground text-xs">Enquiry Date</Label>
+            <p className="mt-1 text-sm">{lead.enquiry_date ? format(new Date(lead.enquiry_date), "MMM d, yyyy") : "—"}</p>
+          </div>
           <div>
             <Label className="text-muted-foreground text-xs">Status</Label>
-            <Select value={lead.status ?? "Open"} onValueChange={(v) => updateLead.mutate({ status: v })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {availableStatuses.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            {!hasItinerary && <p className="text-xs text-muted-foreground mt-1">Submit an itinerary to unlock "On Progress"</p>}
+            {isEditingLeadInfo ? (
+              <>
+                <Select value={leadInfoForm.status} onValueChange={(v) => setLeadInfoForm({ ...leadInfoForm, status: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {availableStatuses.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {!hasItinerary && <p className="text-xs text-muted-foreground mt-1">Submit an itinerary to unlock "On Progress"</p>}
+              </>
+            ) : <p className="mt-1 text-sm">{lead.status || "—"}</p>}
           </div>
           <div>
             <Label className="text-muted-foreground text-xs">Itinerary Code</Label>
-            <Input defaultValue={lead.itinerary_code ?? ""} onBlur={(e) => { if (e.target.value !== lead.itinerary_code) updateLead.mutate({ itinerary_code: e.target.value }) }} className="h-8 mt-1" />
+            {isEditingLeadInfo ? <Input value={leadInfoForm.itinerary_code} onChange={(e) => setLeadInfoForm({ ...leadInfoForm, itinerary_code: e.target.value })} className="h-8 mt-1" /> : <p className="mt-1 text-sm">{lead.itinerary_code || "—"}</p>}
           </div>
-          <div><Label className="text-muted-foreground text-xs">Destination</Label>
-            <Input defaultValue={lead.destination || ""} onBlur={(e) => { if (e.target.value !== lead.destination) updateLead.mutate({ destination: e.target.value }) }} className="h-8 mt-1" />
+          <div>
+            <Label className="text-muted-foreground text-xs">Destination</Label>
+            {isEditingLeadInfo ? <Input value={leadInfoForm.destination} onChange={(e) => setLeadInfoForm({ ...leadInfoForm, destination: e.target.value })} className="h-8 mt-1" /> : <p className="mt-1 text-sm">{lead.destination || "—"}</p>}
           </div>
-          <div><Label className="text-muted-foreground text-xs">Travelers</Label>
-            <Input defaultValue={lead.travelers || ""} onBlur={(e) => { if (e.target.value !== String(lead.travelers || "")) updateLead.mutate({ travelers: e.target.value }) }} className="h-8 mt-1" />
+          <div>
+            <Label className="text-muted-foreground text-xs">Travelers</Label>
+            {isEditingLeadInfo ? <Input value={leadInfoForm.travelers} onChange={(e) => setLeadInfoForm({ ...leadInfoForm, travelers: e.target.value })} className="h-8 mt-1" /> : <p className="mt-1 text-sm">{lead.travelers ?? "—"}</p>}
+          </div>
+          <div>
+            <Label className="text-muted-foreground text-xs">Duration</Label>
+            {isEditingLeadInfo ? <Input value={leadInfoForm.trip_duration} onChange={(e) => setLeadInfoForm({ ...leadInfoForm, trip_duration: e.target.value })} className="h-8 mt-1" placeholder="e.g. 5 Days / 4 Nights" /> : <p className="mt-1 text-sm">{lead.trip_duration || "—"}</p>}
           </div>
         </CardContent>
       </Card>

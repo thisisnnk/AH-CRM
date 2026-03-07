@@ -16,7 +16,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useNavigate } from "react-router-dom";
 import { sendNotification } from "@/utils/notificationHelper";
 
-const statusOptions = ["Open", "On Progress", "Lost", "Converted"] as const;
 const sourceOptions = ["Instagram", "Website", "Referral", "Office Direct Lead"] as const;
 
 export default function LeadsPage() {
@@ -34,7 +33,7 @@ export default function LeadsPage() {
     destination: "", travelers: "", trip_duration: "", lead_source: "", assigned_employee_id: "",
   });
 
-  const { data: leads = [] } = useQuery({
+  const { data: leads = [], isLoading: leadsLoading } = useQuery({
     queryKey: ["leads", filter, dateRange, user?.id, role],
     queryFn: async () => {
       let query = supabase
@@ -168,25 +167,6 @@ export default function LeadsPage() {
     },
   });
 
-  const updateStatus = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const updates: any = { status };
-      if (status === "Converted" || status === "Lost") {
-        updates.badge_stage = status;
-      }
-      const { error } = await supabase.from("leads").update(updates).eq("id", id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["leads"] });
-      // Invalidate LeadDetailPage queries too just in case
-      queryClient.invalidateQueries({ queryKey: ["lead"] });
-    },
-    onError: (err: any) => {
-      console.error("Update lead status error:", err);
-      toast({ title: "Error updating status", description: err.message, variant: "destructive" });
-    },
-  });
 
   const deleteLead = useMutation({
     mutationFn: async (id: string) => {
@@ -382,40 +362,17 @@ export default function LeadsPage() {
                 )}
                 {!isAdmin && <td className="py-3 px-4">{lead.itinerary_code ?? "—"}</td>}
                 {!isAdmin && <td className="py-3 px-4">{lead.trip_duration ?? "—"}</td>}
-                <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                  {isAdmin ? (
-                    <Select value={lead.status ?? "Open"} onValueChange={(v) => updateStatus.mutate({ id: lead.id, status: v })}>
-                      <SelectTrigger className="h-8 text-xs w-28">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {statusOptions.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <div className="flex flex-col gap-1 items-start">
-                      <span className={cn(
-                        "px-2 py-1 rounded-full text-xs font-medium text-center w-24",
-                        lead.badge_stage === "Open" && "status-open",
-                        lead.badge_stage === "Follow Up" && "status-ongoing",
-                        lead.badge_stage === "Converted" && "status-converted",
-                        lead.badge_stage === "Lost" && "status-lost",
-                      )}>
-                        {lead.badge_stage}
-                      </span>
-                      {lead.status !== "Converted" && lead.status !== "Lost" && (
-                        <Select value="" onValueChange={(v) => updateStatus.mutate({ id: lead.id, status: v })}>
-                          <SelectTrigger className="h-7 text-[10px] w-24 mt-1">
-                            <SelectValue placeholder="Update..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="Converted">Converted</SelectItem>
-                            <SelectItem value="Lost">Lost</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                  )}
+                <td className="py-3 px-4">
+                  <span className={cn(
+                    "px-2 py-1 rounded-full text-xs font-medium",
+                    (isAdmin ? lead.status : lead.badge_stage) === "Open" && "status-open",
+                    (isAdmin ? lead.status : lead.badge_stage) === "On Progress" && "status-ongoing",
+                    (isAdmin ? lead.status : lead.badge_stage) === "Follow Up" && "status-ongoing",
+                    (isAdmin ? lead.status : lead.badge_stage) === "Converted" && "status-converted",
+                    (isAdmin ? lead.status : lead.badge_stage) === "Lost" && "status-lost",
+                  )}>
+                    {isAdmin ? lead.status : lead.badge_stage}
+                  </span>
                 </td>
                 {isAdmin && (
                   <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
@@ -430,7 +387,10 @@ export default function LeadsPage() {
                 )}
               </tr>
             ))}
-            {filteredLeads.length === 0 && (
+            {leadsLoading && (
+              <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">Loading leads...</td></tr>
+            )}
+            {!leadsLoading && filteredLeads.length === 0 && (
               <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">No leads found</td></tr>
             )}
           </tbody>

@@ -20,7 +20,7 @@ export default function ContactsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "" });
 
-  const { data: contacts = [] } = useQuery({
+  const { data: contacts = [], isLoading: contactsLoading } = useQuery({
     queryKey: ["contacts"],
     queryFn: async () => {
       const { data, error } = await supabase.from("contacts").select("*").order("created_at", { ascending: false });
@@ -150,7 +150,10 @@ export default function ContactsPage() {
                 )}
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {contactsLoading && (
+              <tr><td colSpan={5} className="py-8 text-center text-muted-foreground">Loading contacts...</td></tr>
+            )}
+            {!contactsLoading && filtered.length === 0 && (
               <tr><td colSpan={5} className="py-8 text-center text-muted-foreground">No contacts found</td></tr>
             )}
           </tbody>
