@@ -274,10 +274,21 @@ export default function LeadDetailPage() {
       });
       if (revErr) throw revErr;
 
+      let extractedCode = lead.itinerary_code || "";
+      if (itineraryFile && (!lead.itinerary_code || lead.itinerary_code.startsWith("http"))) {
+        const match = itineraryFile.name.match(/^([A-Z0-9]+-[A-Z0-9]+(?:-[A-Z0-9]+)?)/i);
+        if (match) {
+          extractedCode = match[1].toUpperCase();
+        } else {
+          // fallback to the first part of filename before space/dash/dot if possible
+          extractedCode = itineraryFile.name.split(/[\s\.\_]/)[0].toUpperCase();
+        }
+      }
+
       await supabase.from("leads").update({
-        status: "On Progress",
-        badge_stage: "Follow Up",
-        itinerary_code: itineraryUrl,
+        status: lead.status === "Open" ? "On Progress" : lead.status,
+        badge_stage: lead.badge_stage === "Open" ? "Follow Up" : lead.badge_stage,
+        itinerary_code: extractedCode,
         last_activity_at: new Date().toISOString(),
       }).eq("id", id!);
 
@@ -434,19 +445,29 @@ export default function LeadDetailPage() {
       <Card>
         <CardHeader><CardTitle>Personal Details</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div><Label className="text-muted-foreground text-xs">Name</Label><p className="font-medium">{lead.name}</p></div>
-          <div><Label className="text-muted-foreground text-xs">Phone</Label><p><a href={`tel:${lead.phone}`} className="flex items-center gap-1 text-info hover:underline"><Phone className="h-3 w-3" />{lead.phone}</a></p></div>
+          <div><Label className="text-muted-foreground text-xs">Name</Label>
+            <Input defaultValue={lead.name} onBlur={(e) => { if (e.target.value !== lead.name) updateLead.mutate({ name: e.target.value }) }} className="h-8 mt-1" />
+          </div>
+          <div><Label className="text-muted-foreground text-xs">Phone</Label>
+            <Input defaultValue={lead.phone} onBlur={(e) => { if (e.target.value !== lead.phone) updateLead.mutate({ phone: e.target.value }) }} className="h-8 mt-1" />
+          </div>
           <div><Label className="text-muted-foreground text-xs">WhatsApp</Label>
-            {lead.whatsapp ? (
-              <a href={`https://wa.me/${lead.whatsapp.replace(/[^0-9]/g, "")}`} target="_blank" rel="noopener" className="flex items-center gap-1 text-success hover:underline">
-                <ExternalLink className="h-3 w-3" />{lead.whatsapp}
-              </a>
-            ) : <p className="text-muted-foreground">—</p>}
+            <Input defaultValue={lead.whatsapp || ""} onBlur={(e) => { if (e.target.value !== lead.whatsapp) updateLead.mutate({ whatsapp: e.target.value }) }} className="h-8 mt-1" />
           </div>
           <div><Label className="text-muted-foreground text-xs">Email</Label>
-            {lead.email ? <a href={`mailto:${lead.email}`} className="flex items-center gap-1 text-info hover:underline"><Mail className="h-3 w-3" />{lead.email}</a> : <p className="text-muted-foreground">—</p>}
+            <Input defaultValue={lead.email || ""} onBlur={(e) => { if (e.target.value !== lead.email) updateLead.mutate({ email: e.target.value }) }} className="h-8 mt-1" />
           </div>
-          <div><Label className="text-muted-foreground text-xs">Location</Label><p className="flex items-center gap-1"><MapPin className="h-3 w-3 text-muted-foreground" />{[lead.city, lead.state, lead.country].filter(Boolean).join(", ") || "—"}</p></div>
+          <div className="col-span-1 md:col-span-2 grid grid-cols-3 gap-2">
+            <div><Label className="text-muted-foreground text-xs">City</Label>
+              <Input defaultValue={lead.city || ""} onBlur={(e) => { if (e.target.value !== lead.city) updateLead.mutate({ city: e.target.value }) }} className="h-8 mt-1" placeholder="City" />
+            </div>
+            <div><Label className="text-muted-foreground text-xs">State</Label>
+              <Input defaultValue={lead.state || ""} onBlur={(e) => { if (e.target.value !== lead.state) updateLead.mutate({ state: e.target.value }) }} className="h-8 mt-1" placeholder="State" />
+            </div>
+            <div><Label className="text-muted-foreground text-xs">Country</Label>
+              <Input defaultValue={lead.country || ""} onBlur={(e) => { if (e.target.value !== lead.country) updateLead.mutate({ country: e.target.value }) }} className="h-8 mt-1" placeholder="Country" />
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -476,10 +497,14 @@ export default function LeadDetailPage() {
           </div>
           <div>
             <Label className="text-muted-foreground text-xs">Itinerary Code</Label>
-            <Input defaultValue={lead.itinerary_code ?? ""} onBlur={(e) => updateLead.mutate({ itinerary_code: e.target.value })} />
+            <Input defaultValue={lead.itinerary_code ?? ""} onBlur={(e) => { if (e.target.value !== lead.itinerary_code) updateLead.mutate({ itinerary_code: e.target.value }) }} className="h-8 mt-1" />
           </div>
-          <div><Label className="text-muted-foreground text-xs">Destination</Label><p>{lead.destination ?? "—"}</p></div>
-          <div><Label className="text-muted-foreground text-xs">Travelers</Label><p>{lead.travelers ?? "—"}</p></div>
+          <div><Label className="text-muted-foreground text-xs">Destination</Label>
+            <Input defaultValue={lead.destination || ""} onBlur={(e) => { if (e.target.value !== lead.destination) updateLead.mutate({ destination: e.target.value }) }} className="h-8 mt-1" />
+          </div>
+          <div><Label className="text-muted-foreground text-xs">Travelers</Label>
+            <Input defaultValue={lead.travelers || ""} onBlur={(e) => { if (e.target.value !== String(lead.travelers || "")) updateLead.mutate({ travelers: e.target.value }) }} className="h-8 mt-1" />
+          </div>
         </CardContent>
       </Card>
 

@@ -8,12 +8,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
-import { Plus, Search } from "lucide-react";
+import { CalendarIcon, Plus, Search, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format, subDays, endOfDay } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CalendarIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { sendNotification } from "@/utils/notificationHelper";
 
@@ -171,13 +170,36 @@ export default function LeadsPage() {
 
   const updateStatus = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const { error } = await supabase.from("leads").update({ status }).eq("id", id);
+      const updates: any = { status };
+      if (status === "Converted" || status === "Lost") {
+        updates.badge_stage = status;
+      }
+      const { error } = await supabase.from("leads").update(updates).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["leads"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      // Invalidate LeadDetailPage queries too just in case
+      queryClient.invalidateQueries({ queryKey: ["lead"] });
+    },
     onError: (err: any) => {
       console.error("Update lead status error:", err);
       toast({ title: "Error updating status", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deleteLead = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("leads").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      toast({ title: "Lead deleted" });
+    },
+    onError: (err: any) => {
+      console.error("Delete lead error:", err);
+      toast({ title: "Error deleting lead", description: err.message, variant: "destructive" });
     },
   });
 
@@ -332,6 +354,7 @@ export default function LeadsPage() {
               {!isAdmin && <th className="text-left py-3 px-4">Itinerary Code</th>}
               {!isAdmin && <th className="text-left py-3 px-4">Duration</th>}
               <th className="text-left py-3 px-4">Status</th>
+              {isAdmin && <th className="text-right py-3 px-4 w-16"></th>}
             </tr>
           </thead>
           <tbody>
@@ -370,17 +393,41 @@ export default function LeadsPage() {
                       </SelectContent>
                     </Select>
                   ) : (
-                    <span className={cn(
-                      "px-2 py-1 rounded-full text-xs font-medium",
-                      lead.badge_stage === "Open" && "status-open",
-                      lead.badge_stage === "Follow Up" && "status-ongoing",
-                      lead.badge_stage === "Converted" && "status-converted",
-                      lead.badge_stage === "Lost" && "status-lost",
-                    )}>
-                      {lead.badge_stage}
-                    </span>
+                    <div className="flex flex-col gap-1 items-start">
+                      <span className={cn(
+                        "px-2 py-1 rounded-full text-xs font-medium text-center w-24",
+                        lead.badge_stage === "Open" && "status-open",
+                        lead.badge_stage === "Follow Up" && "status-ongoing",
+                        lead.badge_stage === "Converted" && "status-converted",
+                        lead.badge_stage === "Lost" && "status-lost",
+                      )}>
+                        {lead.badge_stage}
+                      </span>
+                      {lead.status !== "Converted" && lead.status !== "Lost" && (
+                        <Select value="" onValueChange={(v) => updateStatus.mutate({ id: lead.id, status: v })}>
+                          <SelectTrigger className="h-7 text-[10px] w-24 mt-1">
+                            <SelectValue placeholder="Update..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Converted">Converted</SelectItem>
+                            <SelectItem value="Lost">Lost</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
                   )}
                 </td>
+                {isAdmin && (
+                  <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => {
+                      if (confirm("Are you sure you want to delete this lead?")) {
+                        deleteLead.mutate(lead.id);
+                      }
+                    }}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </td>
+                )}
               </tr>
             ))}
             {filteredLeads.length === 0 && (

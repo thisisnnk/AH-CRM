@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
-import { Plus, Search } from "lucide-react";
+import { Plus, Search, MapPin, Mail, Phone, Calendar as CalendarIcon, ExternalLink, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 export default function ContactsPage() {
@@ -63,6 +63,21 @@ export default function ContactsPage() {
     },
   });
 
+  const deleteContact = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("contacts").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+      toast({ title: "Contact deleted" });
+    },
+    onError: (err: any) => {
+      console.error("Delete contact error:", err);
+      toast({ title: "Error deleting contact", description: err.message, variant: "destructive" });
+    },
+  });
+
   const filtered = contacts.filter((c) => {
     if (!search) return true;
     const s = search.toLowerCase();
@@ -111,6 +126,7 @@ export default function ContactsPage() {
               <th className="text-left py-3 px-4">Phone</th>
               <th className="text-left py-3 px-4">Email</th>
               <th className="text-left py-3 px-4">City</th>
+              {isAdmin && <th className="text-right py-3 px-4 w-16"></th>}
             </tr>
           </thead>
           <tbody>
@@ -121,6 +137,17 @@ export default function ContactsPage() {
                 <td className="py-3 px-4">{c.phone}</td>
                 <td className="py-3 px-4">{c.email ?? "—"}</td>
                 <td className="py-3 px-4">{c.city ?? "—"}</td>
+                {isAdmin && (
+                  <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => {
+                      if (confirm("Are you sure you want to delete this contact?")) {
+                        deleteContact.mutate(c.id);
+                      }
+                    }}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </td>
+                )}
               </tr>
             ))}
             {filtered.length === 0 && (
