@@ -59,6 +59,8 @@ export default function LeadsPage() {
       return data ?? [];
     },
     enabled: !!user,
+    refetchOnMount: "always",
+    retry: 2,
   });
 
   const { data: employees = [] } = useQuery({
@@ -67,6 +69,7 @@ export default function LeadsPage() {
       const { data } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
       return data ?? [];
     },
+    refetchOnMount: "always",
   });
 
   // Generate client ID in AH-YYYY-MM-NNNN format

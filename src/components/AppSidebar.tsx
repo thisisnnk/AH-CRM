@@ -51,8 +51,13 @@ export function AppSidebar() {
   const items = role === "admin" ? adminNav : employeeNav;
 
   const handleSignOut = async () => {
-    await signOut();
-    navigate("/login");
+    try {
+      await signOut();
+      navigate("/login");
+    } catch (err) {
+      console.error("Sign out error:", err);
+      window.location.href = "/login";
+    }
   };
 
   return (

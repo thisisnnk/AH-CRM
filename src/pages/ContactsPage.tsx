@@ -31,6 +31,8 @@ export default function ContactsPage() {
       }
       return data ?? [];
     },
+    refetchOnMount: "always",
+    retry: 2,
   });
 
   const createContact = useMutation({

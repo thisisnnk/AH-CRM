@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -11,7 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "@/hooks/use-toast";
-import { ArrowLeft, Upload, Phone, Mail, MapPin, ExternalLink, FileText, MessageSquare, Mic, RefreshCw } from "lucide-react";
+import { ArrowLeft, Upload, Phone, Mail, MapPin, ExternalLink, FileText, MessageSquare, Mic, RefreshCw, X, Loader2, CheckCircle } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Calendar } from "@/components/ui/calendar";
@@ -19,6 +19,108 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { CalendarIcon } from "lucide-react";
 import { sendNotification } from "@/utils/notificationHelper";
 
+// ── File Upload Widget ─────────────────────────────────────────
+function FileUploadWidget({
+  accept,
+  label,
+  file,
+  onSelect,
+  onRemove,
+  uploading,
+  progress,
+  uploaded,
+}: {
+  accept: string;
+  label: string;
+  file: File | null;
+  onSelect: (f: File | null) => void;
+  onRemove: () => void;
+  uploading: boolean;
+  progress: number;
+  uploaded: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // State: Uploaded successfully — show green bar with filename + remove
+  if (uploaded && file) {
+    return (
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">{label}</Label>
+        <div className="flex items-center gap-2 p-3 rounded-lg border bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800">
+          <CheckCircle className="h-4 w-4 text-green-600 shrink-0" />
+          <span className="text-sm font-medium text-green-700 dark:text-green-400 truncate flex-1">{file.name}</span>
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 hover:bg-red-100 dark:hover:bg-red-900/30" onClick={onRemove} title="Remove file">
+            <X className="h-4 w-4 text-red-500" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // State: Uploading — show progress bar
+  if (uploading) {
+    return (
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">{label}</Label>
+        <div className="space-y-2 p-3 rounded-lg border bg-muted/30">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            <span className="text-sm text-muted-foreground truncate">Uploading {file?.name}...</span>
+          </div>
+          <div className="w-full bg-muted rounded-full h-2.5">
+            <div className="bg-primary h-2.5 rounded-full transition-all duration-300 ease-out" style={{ width: `${progress}%` }} />
+          </div>
+          <span className="text-xs font-medium text-primary">{progress}%</span>
+        </div>
+      </div>
+    );
+  }
+
+  // State: File selected but not yet uploaded — show filename + remove
+  if (file) {
+    return (
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">{label}</Label>
+        <div className="flex items-center gap-2 p-3 rounded-lg border bg-muted/20">
+          <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+          <span className="text-sm truncate flex-1">{file.name}</span>
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 hover:bg-red-100 dark:hover:bg-red-900/30" onClick={onRemove} title="Remove file">
+            <X className="h-4 w-4 text-red-500" />
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // State: No file — show styled Choose File button
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs text-muted-foreground">{label}</Label>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(e) => {
+          onSelect(e.target.files?.[0] ?? null);
+          e.target.value = ""; // Reset so re-selecting same file works
+        }}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full justify-start gap-2 border-dashed"
+        onClick={() => inputRef.current?.click()}
+      >
+        <Upload className="h-4 w-4 text-muted-foreground" />
+        <span className="text-muted-foreground">Choose File</span>
+      </Button>
+    </div>
+  );
+}
+
+
+// ── Main Component ─────────────────────────────────────────────
 export default function LeadDetailPage() {
   const { id } = useParams();
   const { user, role } = useAuth();
@@ -26,20 +128,70 @@ export default function LeadDetailPage() {
   const queryClient = useQueryClient();
   const isAdmin = role === "admin";
 
-  // Itinerary form state
-  const [itineraryLink, setItineraryLink] = useState("");
-  // Revision form state
-  const [revForm, setRevForm] = useState({
-    type: "" as string,
-    file: null as File | null,
-    itineraryLink: "",
-    notes: "",
-  });
-  // Proof form state
-  const [proofFile, setProofFile] = useState<File | null>(null);
+  // Itinerary state
+  const [itineraryFile, setItineraryFile] = useState<File | null>(null);
+  const [itineraryUploading, setItineraryUploading] = useState(false);
+  const [itineraryProgress, setItineraryProgress] = useState(0);
+  const [itineraryUploaded, setItineraryUploaded] = useState(false);
+  const [itineraryUrl, setItineraryUrl] = useState<string | null>(null);
+
+  // Revision state
+  const [revForm, setRevForm] = useState({ type: "" as string, notes: "", itineraryLink: "" });
+  const [revFile, setRevFile] = useState<File | null>(null);
+  const [revUploading, setRevUploading] = useState(false);
+  const [revProgress, setRevProgress] = useState(0);
+  const [revUploaded, setRevUploaded] = useState(false);
+  const [revFileUrl, setRevFileUrl] = useState<string | null>(null);
+
   // Task form state
   const [taskForm, setTaskForm] = useState({ description: "", followUpDate: undefined as Date | undefined, notes: "", assignedTo: "" });
 
+  // ── Upload helper with real progress ──
+  const uploadFile = async (file: File, folder: string, setProgress: (n: number) => void): Promise<string> => {
+    const filePath = `${folder}/${id}/${Date.now()}_${file.name}`;
+    const bucket = "crm-files";
+
+    // Get session token for auth header
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const supabaseUrl = (supabase as any).supabaseUrl ?? import.meta.env.VITE_SUPABASE_URL;
+
+    return new Promise<string>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const url = `${supabaseUrl}/storage/v1/object/${bucket}/${filePath}`;
+
+      // Track real upload progress
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          setProgress(pct);
+        }
+      });
+
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          setProgress(100);
+          const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
+          resolve(publicUrl);
+        } else {
+          let msg = "Upload failed";
+          try { msg = JSON.parse(xhr.responseText)?.message ?? msg; } catch { }
+          reject(new Error(`${msg} (HTTP ${xhr.status})`));
+        }
+      });
+
+      xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
+      xhr.addEventListener("timeout", () => reject(new Error("Upload timed out — please try again")));
+
+      xhr.open("POST", url);
+      xhr.timeout = 60000; // 60 second timeout
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      xhr.setRequestHeader("x-upsert", "true");
+      xhr.send(file);
+    });
+  };
+
+  // ── Queries ──
   const { data: lead } = useQuery({
     queryKey: ["lead", id],
     queryFn: async () => {
@@ -53,15 +205,6 @@ export default function LeadDetailPage() {
     queryKey: ["revisions", id],
     queryFn: async () => {
       const { data } = await supabase.from("revisions").select("*").eq("lead_id", id!).order("revision_number", { ascending: true });
-      return data ?? [];
-    },
-    enabled: !!id,
-  });
-
-  const { data: proofs = [] } = useQuery({
-    queryKey: ["proofs", id],
-    queryFn: async () => {
-      const { data } = await supabase.from("proof_of_activities").select("*").eq("lead_id", id!).order("created_at", { ascending: false });
       return data ?? [];
     },
     enabled: !!id,
@@ -93,25 +236,15 @@ export default function LeadDetailPage() {
     },
   });
 
-  // Check if itinerary has been submitted (determines if "On Progress" status is available)
   const hasItinerary = revisions.some((r) => r.itinerary_link && r.send_status === "Sent") || (lead?.itinerary_code && lead.itinerary_code.trim() !== "");
+  const availableStatuses = hasItinerary ? ["Open", "On Progress", "Lost", "Converted"] : ["Open", "Lost", "Converted"];
 
-  // Available status options depend on whether itinerary has been submitted
-  const availableStatuses = hasItinerary
-    ? ["Open", "On Progress", "Lost", "Converted"]
-    : ["Open", "Lost", "Converted"];
-
+  // ── Mutations ──
   const updateLead = useMutation({
     mutationFn: async (updates: Record<string, any>) => {
       const { error } = await supabase.from("leads").update(updates).eq("id", id!);
       if (error) throw error;
-      const { error: logErr } = await supabase.from("activity_logs").insert({
-        lead_id: id!,
-        user_id: user!.id,
-        action: "Updated lead",
-        details: JSON.stringify(updates),
-      });
-      if (logErr) console.error("Activity log error:", logErr);
+      await supabase.from("activity_logs").insert({ lead_id: id!, user_id: user!.id, action: "Updated lead", details: JSON.stringify(updates) });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["lead", id] });
@@ -123,16 +256,16 @@ export default function LeadDetailPage() {
     },
   });
 
-  // === ITINERARY SUBMISSION ===
+  // Itinerary Submit
   const submitItinerary = useMutation({
     mutationFn: async () => {
-      if (!itineraryLink.trim() || !user) throw new Error("Itinerary link is required");
+      if (!itineraryUrl || !user) throw new Error("Upload file first");
 
-      // Create a revision entry for the itinerary
       const nextNum = revisions.length + 1;
       const { error: revErr } = await supabase.from("revisions").insert({
         revision_number: nextNum,
-        itinerary_link: itineraryLink,
+        call_recording_url: "",
+        itinerary_link: itineraryUrl,
         notes: "Initial itinerary submitted",
         send_status: "Sent",
         date_sent: new Date().toISOString(),
@@ -141,27 +274,21 @@ export default function LeadDetailPage() {
       });
       if (revErr) throw revErr;
 
-      // Auto-set status to "On Progress" + update itinerary_code
-      const { error: updateErr } = await supabase.from("leads").update({
+      await supabase.from("leads").update({
         status: "On Progress",
         badge_stage: "Follow Up",
-        itinerary_code: itineraryLink,
+        itinerary_code: itineraryUrl,
         last_activity_at: new Date().toISOString(),
       }).eq("id", id!);
-      if (updateErr) console.error("Update lead status error:", updateErr);
 
-      // Log activity
-      const { error: logErr } = await supabase.from("activity_logs").insert({
-        lead_id: id!,
-        user_id: user.id,
-        action: "Submitted itinerary",
-        details: `Itinerary link: ${itineraryLink}`,
+      await supabase.from("activity_logs").insert({
+        lead_id: id!, user_id: user.id, action: "Submitted itinerary",
+        details: `File: ${itineraryFile?.name ?? itineraryUrl}`,
       });
-      if (logErr) console.error("Activity log error:", logErr);
     },
     onSuccess: () => {
       toast({ title: "Itinerary submitted", description: "Lead status updated to On Progress" });
-      setItineraryLink("");
+      setItineraryFile(null); setItineraryUploaded(false); setItineraryUrl(null); setItineraryProgress(0);
       queryClient.invalidateQueries({ queryKey: ["lead", id] });
       queryClient.invalidateQueries({ queryKey: ["revisions", id] });
       queryClient.invalidateQueries({ queryKey: ["activities", id] });
@@ -172,28 +299,18 @@ export default function LeadDetailPage() {
     },
   });
 
-  // === REVISION (Chat Screenshot / Call Recording / Revised Itinerary) ===
+  // Revision Submit
   const addRevision = useMutation({
     mutationFn: async () => {
-      if (!user || !revForm.type) throw new Error("Select a revision type");
+      if (!user || !revForm.type) throw new Error("Select type");
 
-      let fileUrl: string | null = null;
-
-      // Upload file if provided (for screenshot or call recording)
-      if (revForm.file) {
-        const folder = revForm.type === "Call Recording" ? "recordings" : "revisions";
-        const filePath = `${folder}/${id}/${Date.now()}_${revForm.file.name}`;
-        const { error: uploadErr } = await supabase.storage.from("crm-files").upload(filePath, revForm.file);
-        if (uploadErr) throw uploadErr;
-        const { data: { publicUrl } } = supabase.storage.from("crm-files").getPublicUrl(filePath);
-        fileUrl = publicUrl;
-      }
-
+      let fileUrl = revFileUrl;
       const nextNum = revisions.length + 1;
+
       const { error: revErr } = await supabase.from("revisions").insert({
         revision_number: nextNum,
         call_recording_url: revForm.type === "Call Recording" ? fileUrl : null,
-        itinerary_link: revForm.type === "Revised Itinerary" ? revForm.itineraryLink : null,
+        itinerary_link: revForm.type === "Revised Itinerary" ? revForm.itineraryLink : (revForm.type === "Chat Screenshot" ? fileUrl : null),
         notes: `[${revForm.type}] ${revForm.notes}`,
         send_status: revForm.type === "Revised Itinerary" ? "Sent" : "Pending",
         date_sent: revForm.type === "Revised Itinerary" ? new Date().toISOString() : null,
@@ -202,27 +319,22 @@ export default function LeadDetailPage() {
       });
       if (revErr) throw revErr;
 
-      // Update last activity
       await supabase.from("leads").update({ last_activity_at: new Date().toISOString() }).eq("id", id!);
 
-      // Log activity
-      const details = revForm.type === "Chat Screenshot"
-        ? `Screenshot uploaded`
-        : revForm.type === "Call Recording"
-          ? `Call recording uploaded`
+      const details = revForm.type === "Chat Screenshot" ? "Screenshot uploaded"
+        : revForm.type === "Call Recording" ? "Call recording uploaded"
           : `Revised itinerary: ${revForm.itineraryLink}`;
 
-      const { error: logErr } = await supabase.from("activity_logs").insert({
-        lead_id: id!,
-        user_id: user.id,
+      await supabase.from("activity_logs").insert({
+        lead_id: id!, user_id: user.id,
         action: `Added Revision ${nextNum} — ${revForm.type}`,
         details: `${details}${revForm.notes ? `. Notes: ${revForm.notes}` : ""}`,
       });
-      if (logErr) console.error("Activity log error:", logErr);
     },
     onSuccess: () => {
       toast({ title: "Revision added" });
-      setRevForm({ type: "", file: null, itineraryLink: "", notes: "" });
+      setRevForm({ type: "", notes: "", itineraryLink: "" });
+      setRevFile(null); setRevUploaded(false); setRevFileUrl(null); setRevProgress(0);
       queryClient.invalidateQueries({ queryKey: ["revisions", id] });
       queryClient.invalidateQueries({ queryKey: ["lead", id] });
       queryClient.invalidateQueries({ queryKey: ["activities", id] });
@@ -233,78 +345,27 @@ export default function LeadDetailPage() {
     },
   });
 
-  // === PROOF OF ACTIVITY ===
-  const submitProof = useMutation({
-    mutationFn: async () => {
-      if (!proofFile || !user) throw new Error("Missing file or user session");
-      const filePath = `proofs/${id}/${Date.now()}_${proofFile.name}`;
-      const { error: uploadErr } = await supabase.storage.from("crm-files").upload(filePath, proofFile);
-      if (uploadErr) throw uploadErr;
-      const { data: { publicUrl } } = supabase.storage.from("crm-files").getPublicUrl(filePath);
-
-      const { error: insertErr } = await supabase.from("proof_of_activities").insert({
-        file_url: publicUrl,
-        file_type: proofFile.type,
-        submitted_by: user.id,
-        lead_id: id!,
-      });
-      if (insertErr) throw insertErr;
-
-      await supabase.from("leads").update({ last_activity_at: new Date().toISOString() }).eq("id", id!);
-
-      const { error: logErr } = await supabase.from("activity_logs").insert({
-        lead_id: id!,
-        user_id: user.id,
-        action: "Submitted proof of activity",
-        details: proofFile.name,
-      });
-      if (logErr) console.error("Activity log error:", logErr);
-    },
-    onSuccess: () => {
-      toast({ title: "Proof submitted" });
-      setProofFile(null);
-      queryClient.invalidateQueries({ queryKey: ["proofs", id] });
-      queryClient.invalidateQueries({ queryKey: ["lead", id] });
-      queryClient.invalidateQueries({ queryKey: ["activities", id] });
-    },
-    onError: (err: any) => {
-      console.error("Submit proof error:", err);
-      toast({ title: "Error submitting proof", description: err.message, variant: "destructive" });
-    },
-  });
-
-  // === CREATE TASK ===
+  // Task Create
   const createTask = useMutation({
     mutationFn: async () => {
       if (!user || !taskForm.followUpDate) throw new Error("Missing required fields");
       const assignedTo = taskForm.assignedTo || lead?.assigned_employee_id || user.id;
 
-      const { error: taskErr } = await supabase.from("tasks").insert({
-        description: taskForm.description,
-        follow_up_date: taskForm.followUpDate.toISOString(),
-        notes: taskForm.notes || null,
-        lead_id: id!,
-        assigned_employee_id: assignedTo,
-        created_by: user.id,
+      const { error } = await supabase.from("tasks").insert({
+        description: taskForm.description, follow_up_date: taskForm.followUpDate.toISOString(),
+        notes: taskForm.notes || null, lead_id: id!, assigned_employee_id: assignedTo, created_by: user.id,
       });
-      if (taskErr) throw taskErr;
+      if (error) throw error;
 
-      const { error: logErr } = await supabase.from("activity_logs").insert({
-        lead_id: id!,
-        user_id: user.id,
-        action: "Created task",
-        details: taskForm.description,
+      await supabase.from("activity_logs").insert({
+        lead_id: id!, user_id: user.id, action: "Created task", details: taskForm.description,
       });
-      if (logErr) console.error("Activity log error:", logErr);
 
-      // Notify assigned employee
       if (assignedTo !== user.id) {
         await sendNotification({
-          recipientId: assignedTo,
-          type: "task_assigned",
+          recipientId: assignedTo, type: "task_assigned",
           message: `New task for lead "${lead?.name ?? ""}": ${taskForm.description}`,
-          leadId: id,
-          isTask: true,
+          leadId: id, isTask: true,
         });
       }
     },
@@ -322,15 +383,45 @@ export default function LeadDetailPage() {
 
   if (!lead) return <div className="py-8 text-center text-muted-foreground">Loading...</div>;
 
+  // ── Handlers ──
+  const handleItineraryUpload = async () => {
+    if (!itineraryFile) return;
+    setItineraryUploading(true);
+    setItineraryProgress(0);
+    try {
+      const url = await uploadFile(itineraryFile, "itineraries", setItineraryProgress);
+      setItineraryUrl(url);
+      setItineraryUploaded(true);
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+    }
+    setItineraryUploading(false);
+  };
+
+  const handleRevFileUpload = async () => {
+    if (!revFile) return;
+    const folder = revForm.type === "Call Recording" ? "recordings" : "revisions";
+    setRevUploading(true);
+    setRevProgress(0);
+    try {
+      const url = await uploadFile(revFile, folder, setRevProgress);
+      setRevFileUrl(url);
+      setRevUploaded(true);
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+    }
+    setRevUploading(false);
+  };
+
   const revisionTypeIcons: Record<string, any> = {
     "Chat Screenshot": <MessageSquare className="h-4 w-4" />,
     "Call Recording": <Mic className="h-4 w-4" />,
     "Revised Itinerary": <RefreshCw className="h-4 w-4" />,
   };
 
-  const canAddRevision = revForm.type && revForm.notes.trim() &&
-    ((revForm.type === "Chat Screenshot" && revForm.file) ||
-      (revForm.type === "Call Recording" && revForm.file) ||
+  const canSubmitRevision = revForm.type && revForm.notes.trim() &&
+    ((revForm.type === "Chat Screenshot" && revUploaded) ||
+      (revForm.type === "Call Recording" && revUploaded) ||
       (revForm.type === "Revised Itinerary" && revForm.itineraryLink.trim()));
 
   return (
@@ -359,7 +450,7 @@ export default function LeadDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Lead Information — status restricted */}
+      {/* Lead Information */}
       <Card>
         <CardHeader><CardTitle>Lead Information</CardTitle></CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -381,7 +472,7 @@ export default function LeadDetailPage() {
                 {availableStatuses.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
               </SelectContent>
             </Select>
-            {!hasItinerary && <p className="text-xs text-muted-foreground mt-1">Submit an itinerary to unlock "On Progress" status</p>}
+            {!hasItinerary && <p className="text-xs text-muted-foreground mt-1">Submit an itinerary to unlock "On Progress"</p>}
           </div>
           <div>
             <Label className="text-muted-foreground text-xs">Itinerary Code</Label>
@@ -392,7 +483,7 @@ export default function LeadDetailPage() {
         </CardContent>
       </Card>
 
-      {/* === ITINERARY SECTION === */}
+      {/* ═══ ITINERARY ═══ */}
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><FileText className="h-5 w-5" /> Itinerary</CardTitle></CardHeader>
         <CardContent className="space-y-4">
@@ -404,31 +495,47 @@ export default function LeadDetailPage() {
           ) : (
             <div className="p-4 rounded-lg border border-dashed border-amber-300 bg-amber-50 dark:bg-amber-950/20">
               <p className="text-sm font-medium text-amber-700 dark:text-amber-400">⚠ No itinerary submitted yet</p>
-              <p className="text-xs text-muted-foreground mt-1">Submit an itinerary to move this lead to "On Progress"</p>
+              <p className="text-xs text-muted-foreground mt-1">Upload an itinerary to move this lead to "On Progress"</p>
             </div>
           )}
 
-          <Separator />
-          <p className="font-medium text-sm">Submit Itinerary</p>
-          <div className="flex items-center gap-3">
-            <Input
-              value={itineraryLink}
-              onChange={(e) => setItineraryLink(e.target.value)}
-              placeholder="https://... (itinerary or quotation link)"
-              className="flex-1"
-            />
-            <Button onClick={() => submitItinerary.mutate()} disabled={!itineraryLink.trim() || submitItinerary.isPending}>
-              <Upload className="h-4 w-4 mr-1" /> Submit
-            </Button>
-          </div>
+          {!hasItinerary && (
+            <>
+              <Separator />
+              <p className="font-medium text-sm">Submit Itinerary</p>
+
+              <FileUploadWidget
+                accept=".pdf,.doc,.docx,.xls,.xlsx,image/*"
+                label="Itinerary File *"
+                file={itineraryFile}
+                onSelect={(f) => { setItineraryFile(f); setItineraryUploaded(false); setItineraryUrl(null); setItineraryProgress(0); }}
+                onRemove={() => { setItineraryFile(null); setItineraryUploaded(false); setItineraryUrl(null); setItineraryProgress(0); }}
+                uploading={itineraryUploading}
+                progress={itineraryProgress}
+                uploaded={itineraryUploaded}
+              />
+
+              <div className="flex gap-2">
+                {itineraryFile && !itineraryUploaded && !itineraryUploading && (
+                  <Button variant="outline" onClick={handleItineraryUpload}>
+                    <Upload className="h-4 w-4 mr-1" /> Upload File
+                  </Button>
+                )}
+                {itineraryUploaded && (
+                  <Button onClick={() => submitItinerary.mutate()} disabled={submitItinerary.isPending}>
+                    <Upload className="h-4 w-4 mr-1" /> Submit Itinerary
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 
-      {/* === REVISIONS SECTION === */}
+      {/* ═══ REVISIONS ═══ */}
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2"><RefreshCw className="h-5 w-5" /> Revisions</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          {/* Existing revisions */}
           {revisions.map((rev) => {
             const typeMatch = rev.notes?.match(/^\[(.*?)\]/);
             const revType = typeMatch ? typeMatch[1] : "Revision";
@@ -443,7 +550,7 @@ export default function LeadDetailPage() {
                     <p className="text-sm text-muted-foreground mt-1">{rev.notes?.replace(/^\[.*?\]\s*/, "")}</p>
                     {rev.itinerary_link && (
                       <a href={rev.itinerary_link} target="_blank" rel="noopener" className="text-xs text-info hover:underline mt-1 block">
-                        <ExternalLink className="h-3 w-3 inline mr-1" />Itinerary Link
+                        <ExternalLink className="h-3 w-3 inline mr-1" />Itinerary / File Link
                       </a>
                     )}
                     {rev.call_recording_url && (
@@ -468,7 +575,10 @@ export default function LeadDetailPage() {
           <div className="space-y-3">
             <div>
               <Label>Type *</Label>
-              <Select value={revForm.type} onValueChange={(v) => setRevForm({ ...revForm, type: v, file: null, itineraryLink: "" })}>
+              <Select value={revForm.type} onValueChange={(v) => {
+                setRevForm({ ...revForm, type: v, itineraryLink: "" });
+                setRevFile(null); setRevUploaded(false); setRevFileUrl(null); setRevProgress(0);
+              }}>
                 <SelectTrigger><SelectValue placeholder="Select revision type" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Chat Screenshot">💬 Chat Screenshot</SelectItem>
@@ -478,61 +588,41 @@ export default function LeadDetailPage() {
               </Select>
             </div>
 
-            {/* Conditional fields based on type */}
             {(revForm.type === "Chat Screenshot" || revForm.type === "Call Recording") && (
-              <div>
-                <Label>{revForm.type === "Chat Screenshot" ? "Screenshot File *" : "Recording File *"}</Label>
-                <Input
-                  type="file"
+              <>
+                <FileUploadWidget
                   accept={revForm.type === "Chat Screenshot" ? "image/*" : "audio/*,video/*"}
-                  onChange={(e) => setRevForm({ ...revForm, file: e.target.files?.[0] ?? null })}
+                  label={revForm.type === "Chat Screenshot" ? "Screenshot File *" : "Recording File *"}
+                  file={revFile}
+                  onSelect={(f) => { setRevFile(f); setRevUploaded(false); setRevFileUrl(null); setRevProgress(0); }}
+                  onRemove={() => { setRevFile(null); setRevUploaded(false); setRevFileUrl(null); setRevProgress(0); }}
+                  uploading={revUploading}
+                  progress={revProgress}
+                  uploaded={revUploaded}
                 />
-              </div>
+                {revFile && !revUploaded && !revUploading && (
+                  <Button variant="outline" onClick={handleRevFileUpload}>
+                    <Upload className="h-4 w-4 mr-1" /> Upload File
+                  </Button>
+                )}
+              </>
             )}
 
             {revForm.type === "Revised Itinerary" && (
               <div>
                 <Label>Revised Itinerary Link *</Label>
-                <Input
-                  value={revForm.itineraryLink}
-                  onChange={(e) => setRevForm({ ...revForm, itineraryLink: e.target.value })}
-                  placeholder="https://..."
-                />
+                <Input value={revForm.itineraryLink} onChange={(e) => setRevForm({ ...revForm, itineraryLink: e.target.value })} placeholder="https://..." />
               </div>
             )}
 
             {revForm.type && (
-              <div>
-                <Label>Notes *</Label>
-                <Textarea value={revForm.notes} onChange={(e) => setRevForm({ ...revForm, notes: e.target.value })} placeholder="Describe the revision..." />
-              </div>
+              <div><Label>Notes *</Label><Textarea value={revForm.notes} onChange={(e) => setRevForm({ ...revForm, notes: e.target.value })} placeholder="Describe the revision..." /></div>
             )}
 
-            <Button onClick={() => addRevision.mutate()} disabled={!canAddRevision || addRevision.isPending}>
-              Save Revision
+            <Button onClick={() => addRevision.mutate()} disabled={!canSubmitRevision || addRevision.isPending}>
+              Submit Revision
             </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Proof of Activity */}
-      <Card>
-        <CardHeader><CardTitle>Proof of Activity</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-3">
-            <Input type="file" onChange={(e) => setProofFile(e.target.files?.[0] ?? null)} className="flex-1" />
-            <Button onClick={() => submitProof.mutate()} disabled={!proofFile || submitProof.isPending}>
-              <Upload className="h-4 w-4 mr-1" /> Submit
-            </Button>
-          </div>
-          {proofs.map((p) => (
-            <div key={p.id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
-              <div>
-                <a href={p.file_url} target="_blank" rel="noopener" className="text-sm text-info hover:underline">{p.file_type}</a>
-                <p className="text-xs text-muted-foreground">{format(new Date(p.created_at!), "MMM d, yyyy HH:mm")}</p>
-              </div>
-            </div>
-          ))}
         </CardContent>
       </Card>
 
