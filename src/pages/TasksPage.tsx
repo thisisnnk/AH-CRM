@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,28 +11,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CalendarIcon, CheckCircle, Inbox } from "lucide-react";
+import { CalendarIcon, CheckCircle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format } from "date-fns";
-import { cn } from "@/lib/utils";
-import { useNavigate } from "react-router-dom";
-import { Separator } from "@/components/ui/separator";
 import { sendNotification } from "@/utils/notificationHelper";
 
 export default function TasksPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const navigate = useNavigate();
 
-  // Create task form
-  const [taskForm, setTaskForm] = useState({ description: "", followUpDate: undefined as Date | undefined, notes: "", assignedTo: "", leadId: "" });
-
-  const { data: incomingLeads = [] } = useQuery({
-    queryKey: ["incoming-leads"],
-    queryFn: async () => {
-      const { data } = await supabase.from("incoming_leads").select("*").eq("status", "Pending").order("created_at", { ascending: false });
-      return data ?? [];
-    },
+  const [taskForm, setTaskForm] = useState({
+    followUpDate: undefined as Date | undefined,
+    notes: "",
+    assignedTo: "",
+    leadId: "",
   });
 
   const { data: employees = [] } = useQuery({
@@ -45,7 +38,11 @@ export default function TasksPage() {
   const { data: leads = [] } = useQuery({
     queryKey: ["all-leads-select"],
     queryFn: async () => {
-      const { data } = await supabase.from("leads").select("id, name").order("created_at", { ascending: false }).limit(100);
+      const { data } = await supabase
+        .from("leads")
+        .select("id, name, client_id, itinerary_code")
+        .order("created_at", { ascending: false })
+        .limit(200);
       return data ?? [];
     },
   });
@@ -57,7 +54,6 @@ export default function TasksPage() {
         .from("tasks")
         .select("assigned_employee_id, status")
         .eq("status", "Completed");
-      // Group by employee
       const map: Record<string, number> = {};
       (data ?? []).forEach((t) => { map[t.assigned_employee_id] = (map[t.assigned_employee_id] || 0) + 1; });
       return Object.entries(map).map(([empId, count]) => ({
@@ -69,45 +65,16 @@ export default function TasksPage() {
     enabled: employees.length > 0,
   });
 
-  const assignIncoming = useMutation({
-    mutationFn: async ({ incomingId, employeeId, name, phone }: { incomingId: string; employeeId: string; name: string; phone: string }) => {
-      // Create official lead
-      const { error: leadErr } = await supabase.from("leads").insert({
-        name,
-        phone,
-        assigned_employee_id: employeeId,
-        lead_source: "Telegram Bot",
-      });
-      if (leadErr) throw leadErr;
-      // Mark incoming as assigned
-      const { error: updateErr } = await supabase.from("incoming_leads").update({ status: "Assigned" }).eq("id", incomingId);
-      if (updateErr) throw updateErr;
-
-      // Notify assigned employee
-      await sendNotification({
-        recipientId: employeeId,
-        type: "lead_assigned",
-        message: `New lead "${name}" has been assigned to you`,
-      });
-    },
-    onSuccess: () => {
-      toast({ title: "Lead assigned" });
-      queryClient.invalidateQueries({ queryKey: ["incoming-leads"] });
-      queryClient.invalidateQueries({ queryKey: ["leads"] });
-    },
-    onError: (err: any) => {
-      console.error("Assign incoming lead error:", err);
-      toast({ title: "Error assigning lead", description: err.message, variant: "destructive" });
-    },
-  });
+  const selectedLead = leads.find((l) => l.id === taskForm.leadId);
 
   const createTask = useMutation({
     mutationFn: async () => {
       if (!user || !taskForm.followUpDate || !taskForm.leadId || !taskForm.assignedTo) {
         throw new Error("Please fill in all required fields");
       }
+      const taskDescription = taskForm.notes.trim() || `Task for ${selectedLead?.name ?? "lead"}`;
       const { error } = await supabase.from("tasks").insert({
-        description: taskForm.description,
+        description: taskDescription,
         follow_up_date: taskForm.followUpDate.toISOString(),
         notes: taskForm.notes || null,
         lead_id: taskForm.leadId,
@@ -118,20 +85,20 @@ export default function TasksPage() {
     },
     onSuccess: async () => {
       toast({ title: "Task created" });
-      setTaskForm({ description: "", followUpDate: undefined, notes: "", assignedTo: "", leadId: "" });
-
-      // Notify assigned employee
       const assignedEmp = taskForm.assignedTo;
-      if (assignedEmp) {
-        const leadName = leads.find((l) => l.id === taskForm.leadId)?.name ?? "a lead";
+      const lead = selectedLead;
+      setTaskForm({ followUpDate: undefined, notes: "", assignedTo: "", leadId: "" });
+
+      if (assignedEmp && lead) {
         await sendNotification({
           recipientId: assignedEmp,
           type: "task_assigned",
-          message: `New task assigned to you for lead "${leadName}": ${taskForm.description}`,
+          message: `New task assigned to you for "${lead.name}" (${lead.client_id ?? lead.id})`,
           leadId: taskForm.leadId,
           isTask: true,
         });
       }
+      queryClient.invalidateQueries({ queryKey: ["completed-tasks-by-employee"] });
     },
     onError: (err: any) => {
       console.error("Create task error:", err);
@@ -139,50 +106,93 @@ export default function TasksPage() {
     },
   });
 
-  const [assignMap, setAssignMap] = useState<Record<string, string>>({});
-
   return (
     <div className="space-y-6 animate-fade-in">
       <h1 className="text-2xl font-bold">Tasks</h1>
 
-      {/* Section 1: Incoming Leads */}
+      {/* Section 1: Create New Task */}
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Inbox className="h-5 w-5" /> Incoming Leads Inbox</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {incomingLeads.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No pending incoming leads</p>
-          ) : (
-            <div className="space-y-3">
-              {incomingLeads.map((il) => (
-                <div key={il.id} className="p-4 rounded-lg border flex flex-col md:flex-row md:items-center justify-between gap-3">
-                  <div>
-                    <p className="font-medium">{il.name}</p>
-                    <p className="text-sm text-muted-foreground">{il.phone} · {il.source}</p>
-                    <p className="text-xs text-muted-foreground">{format(new Date(il.created_at!), "MMM d, yyyy HH:mm")}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Select value={assignMap[il.id] ?? ""} onValueChange={(v) => setAssignMap({ ...assignMap, [il.id]: v })}>
-                      <SelectTrigger className="w-40"><SelectValue placeholder="Assign to" /></SelectTrigger>
-                      <SelectContent>{employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}</SelectContent>
-                    </Select>
-                    <Button
-                      size="sm"
-                      disabled={!assignMap[il.id]}
-                      onClick={() => assignIncoming.mutate({ incomingId: il.id, employeeId: assignMap[il.id], name: il.name, phone: il.phone })}
-                    >
-                      Assign
-                    </Button>
-                  </div>
-                </div>
-              ))}
+        <CardHeader><CardTitle>Create New Task</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Employee */}
+            <div>
+              <Label>Employee *</Label>
+              <Select value={taskForm.assignedTo} onValueChange={(v) => setTaskForm({ ...taskForm, assignedTo: v })}>
+                <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
+                <SelectContent>{employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
-          )}
+
+            {/* Lead */}
+            <div>
+              <Label>Lead *</Label>
+              <Select value={taskForm.leadId} onValueChange={(v) => setTaskForm({ ...taskForm, leadId: v })}>
+                <SelectTrigger><SelectValue placeholder="Select lead" /></SelectTrigger>
+                <SelectContent>{leads.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+
+            {/* Client ID (auto-filled, read-only) */}
+            <div>
+              <Label>Client ID</Label>
+              <Input
+                value={selectedLead?.client_id ?? ""}
+                readOnly
+                placeholder="Auto-filled from lead"
+                className={cn("bg-muted/40 cursor-default", !selectedLead?.client_id && "text-muted-foreground")}
+              />
+            </div>
+
+            {/* Name (auto-filled, read-only) */}
+            <div>
+              <Label>Name</Label>
+              <Input
+                value={selectedLead?.name ?? ""}
+                readOnly
+                placeholder="Auto-filled from lead"
+                className={cn("bg-muted/40 cursor-default", !selectedLead?.name && "text-muted-foreground")}
+              />
+            </div>
+
+            {/* Follow Up Date */}
+            <div>
+              <Label>Follow Up Date *</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-full justify-start">
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {taskForm.followUpDate ? format(taskForm.followUpDate, "PPP") : "Pick date"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0">
+                  <Calendar mode="single" selected={taskForm.followUpDate} onSelect={(d) => setTaskForm({ ...taskForm, followUpDate: d })} className="p-3 pointer-events-auto" />
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            {/* Notes — full width, big */}
+            <div className="md:col-span-2">
+              <Label>Notes</Label>
+              <Textarea
+                value={taskForm.notes}
+                onChange={(e) => setTaskForm({ ...taskForm, notes: e.target.value })}
+                placeholder="Describe what needs to be done..."
+                className="min-h-[120px] resize-y"
+              />
+            </div>
+          </div>
+
+          <Button
+            onClick={() => createTask.mutate()}
+            disabled={!taskForm.followUpDate || !taskForm.assignedTo || !taskForm.leadId || createTask.isPending}
+          >
+            Create Task
+          </Button>
         </CardContent>
       </Card>
 
-      {/* Section 2: Completed Tasks */}
+      {/* Section 2: Completed Tasks by Employee */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><CheckCircle className="h-5 w-5" /> Completed Tasks by Employee</CardTitle>
@@ -200,46 +210,6 @@ export default function TasksPage() {
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* Section 3: Create Task */}
-      <Card>
-        <CardHeader><CardTitle>Create New Task</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <Label>Employee</Label>
-              <Select value={taskForm.assignedTo} onValueChange={(v) => setTaskForm({ ...taskForm, assignedTo: v })}>
-                <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
-                <SelectContent>{employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Lead</Label>
-              <Select value={taskForm.leadId} onValueChange={(v) => setTaskForm({ ...taskForm, leadId: v })}>
-                <SelectTrigger><SelectValue placeholder="Select lead" /></SelectTrigger>
-                <SelectContent>{leads.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div className="col-span-2"><Label>Description</Label><Input value={taskForm.description} onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })} /></div>
-            <div>
-              <Label>Follow Up Date</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-full justify-start">
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {taskForm.followUpDate ? format(taskForm.followUpDate, "PPP") : "Pick date"}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={taskForm.followUpDate} onSelect={(d) => setTaskForm({ ...taskForm, followUpDate: d })} className="p-3 pointer-events-auto" /></PopoverContent>
-              </Popover>
-            </div>
-            <div><Label>Notes</Label><Textarea value={taskForm.notes} onChange={(e) => setTaskForm({ ...taskForm, notes: e.target.value })} /></div>
-          </div>
-          <Button onClick={() => createTask.mutate()} disabled={!taskForm.description || !taskForm.followUpDate || !taskForm.assignedTo || !taskForm.leadId || createTask.isPending}>
-            Create Task
-          </Button>
         </CardContent>
       </Card>
     </div>

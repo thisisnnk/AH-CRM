@@ -6,9 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
-import { CalendarIcon, Filter, Plus, Search, Trash2 } from "lucide-react";
+import { CalendarIcon, Download, Filter, Inbox, Plus, Search, Trash2 } from "lucide-react";
+import { exportToExcel } from "@/utils/exportExcel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { format, subDays, endOfDay } from "date-fns";
@@ -31,20 +33,23 @@ export default function LeadsPage() {
   const [filterAssignedTos, setFilterAssignedTos] = useState<string[]>([]);
   const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
-  const [dateRange, setDateRange] = useState({ from: subDays(new Date(), 90), to: new Date() });
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [assignMap, setAssignMap] = useState<Record<string, string>>({});
+  const [fromDate, setFromDate] = useState<Date>(subDays(new Date(), 90));
+  const [toDate, setToDate] = useState<Date>(new Date());
   const [newLead, setNewLead] = useState({
     name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "",
     destination: "", travelers: "", trip_duration: "", lead_source: "", assigned_employee_id: "",
   });
 
   const { data: leads = [], isLoading: leadsLoading } = useQuery({
-    queryKey: ["leads", filter, dateRange, user?.id, role],
+    queryKey: ["leads", fromDate, toDate, user?.id, role],
     queryFn: async () => {
       let query = supabase
         .from("leads")
         .select("*")
-        .gte("created_at", dateRange.from.toISOString())
-        .lte("created_at", endOfDay(dateRange.to).toISOString())
+        .gte("created_at", fromDate.toISOString())
+        .lte("created_at", endOfDay(toDate).toISOString())
         .order("created_at", { ascending: false });
 
       if (!isAdmin && user) {
@@ -57,7 +62,6 @@ export default function LeadsPage() {
         toast({ title: "Error loading leads", description: error.message, variant: "destructive" });
         return [];
       }
-      console.log("Leads fetched:", data?.length ?? 0, "records");
       return data ?? [];
     },
     enabled: !!user,
@@ -74,6 +78,15 @@ export default function LeadsPage() {
     refetchOnMount: "always",
   });
 
+  const { data: incomingLeads = [] } = useQuery({
+    queryKey: ["incoming-leads"],
+    queryFn: async () => {
+      const { data } = await supabase.from("incoming_leads").select("*").eq("status", "Pending").order("created_at", { ascending: false });
+      return data ?? [];
+    },
+    enabled: isAdmin,
+  });
+
   // Generate client ID in AH-YYYY-MM-NNNN format
   const generateClientId = async (): Promise<string> => {
     const now = new Date();
@@ -81,7 +94,6 @@ export default function LeadsPage() {
     const mo = (now.getMonth() + 1).toString().padStart(2, "0");
     const prefix = `AH-${yr}-${mo}-`;
 
-    // Try server-side RPC first, fall back to client-side generation
     try {
       const { data: rpcId, error: rpcErr } = await supabase.rpc("generate_client_id");
       if (!rpcErr && rpcId) return rpcId;
@@ -89,7 +101,6 @@ export default function LeadsPage() {
       // RPC not available, generate client-side
     }
 
-    // Fallback: query max existing client_id for this month
     const { data: existing } = await supabase
       .from("leads")
       .select("client_id")
@@ -108,10 +119,8 @@ export default function LeadsPage() {
 
   const createLead = useMutation({
     mutationFn: async () => {
-      // 1. Generate client ID
       const clientId = await generateClientId();
 
-      // 2. Create contact using the same client ID
       const { data: contactData, error: contactErr } = await supabase.from("contacts").insert({
         contact_id: clientId,
         name: newLead.name,
@@ -124,7 +133,6 @@ export default function LeadsPage() {
       }).select("id").single();
       if (contactErr) throw contactErr;
 
-      // 3. Create lead linked to the contact
       const { error: leadErr } = await supabase.from("leads").insert({
         client_id: clientId,
         contact_id: contactData.id,
@@ -143,13 +151,12 @@ export default function LeadsPage() {
       });
       if (leadErr) throw leadErr;
 
-      // 4. Notify assigned employee
       if (newLead.assigned_employee_id) {
         await sendNotification({
           recipientId: newLead.assigned_employee_id,
           type: "lead_assigned",
           message: `New lead "${newLead.name}" has been assigned to you`,
-          leadId: undefined, // We don't have the lead ID from the insert
+          leadId: undefined,
         });
       }
     },
@@ -157,8 +164,7 @@ export default function LeadsPage() {
       toast({ title: "Lead created", description: "Contact was also created automatically." });
       setCreateOpen(false);
       setNewLead({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "", destination: "", travelers: "", trip_duration: "", lead_source: "", assigned_employee_id: "" });
-      // Refresh date range to include the new lead
-      setDateRange((prev) => ({ ...prev, to: new Date() }));
+      setToDate(new Date());
       queryClient.invalidateQueries({ queryKey: ["leads"] });
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },
@@ -168,10 +174,8 @@ export default function LeadsPage() {
     },
   });
 
-
   const deleteLead = useMutation({
     mutationFn: async (id: string) => {
-      // Null out lead_id in notifications to break FK, then delete dependent records
       await (supabase as any).from("notifications").update({ lead_id: null }).eq("lead_id", id);
       await supabase.from("tasks").delete().eq("lead_id", id);
       await supabase.from("activity_logs").delete().eq("lead_id", id);
@@ -194,11 +198,9 @@ export default function LeadsPage() {
       const { error } = await supabase.from("leads").update({ assigned_employee_id: employeeId }).eq("id", id);
       if (error) throw error;
 
-      // Get lead name for notification message
       const { data: leadData } = await supabase.from("leads").select("name").eq("id", id).single();
       const leadName = leadData?.name ?? "a lead";
 
-      // Notify new employee
       await sendNotification({
         recipientId: employeeId,
         type: "lead_reassigned",
@@ -213,6 +215,36 @@ export default function LeadsPage() {
     onError: (err: any) => {
       console.error("Reassign lead error:", err);
       toast({ title: "Error reassigning lead", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const assignIncoming = useMutation({
+    mutationFn: async ({ incomingId, employeeId, name, phone }: { incomingId: string; employeeId: string; name: string; phone: string }) => {
+      const { error: leadErr } = await supabase.from("leads").insert({
+        name,
+        phone,
+        assigned_employee_id: employeeId,
+        lead_source: "Telegram Bot",
+      });
+      if (leadErr) throw leadErr;
+
+      const { error: updateErr } = await supabase.from("incoming_leads").update({ status: "Assigned" }).eq("id", incomingId);
+      if (updateErr) throw updateErr;
+
+      await sendNotification({
+        recipientId: employeeId,
+        type: "lead_assigned",
+        message: `New lead "${name}" has been assigned to you`,
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "Lead assigned" });
+      queryClient.invalidateQueries({ queryKey: ["incoming-leads"] });
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+    },
+    onError: (err: any) => {
+      console.error("Assign incoming lead error:", err);
+      toast({ title: "Error assigning lead", description: err.message, variant: "destructive" });
     },
   });
 
@@ -233,7 +265,6 @@ export default function LeadsPage() {
     return true;
   });
 
-  // Cross-filter counts: each filter popover shows counts based on all OTHER active filters
   const leadsForSource = leads.filter((l) => {
     if (filterAssignedTos.length > 0 && !filterAssignedTos.includes(l.assigned_employee_id ?? "")) return false;
     if (filterStatuses.length > 0 && !filterStatuses.includes((isAdmin ? l.status : l.badge_stage) ?? "")) return false;
@@ -267,28 +298,53 @@ export default function LeadsPage() {
   const badgeKeys = isAdmin ? ["Open", "On Progress", "Converted", "Lost"] : ["Open", "Follow Up", "Converted", "Lost"];
   const badgeIcons = ["🔵", "🔄", "✅", "❌"];
 
+  const handleExport = () => {
+    const rows = filteredLeads.map((l) => ({
+      "Client ID": l.client_id ?? "",
+      "Enquiry Date": l.enquiry_date ? format(new Date(l.enquiry_date), "MMM d, yyyy") : "",
+      "Name": l.name,
+      "Phone": l.phone,
+      "WhatsApp": l.whatsapp ?? "",
+      "Email": l.email ?? "",
+      "City": l.city ?? "",
+      "State": l.state ?? "",
+      "Country": l.country ?? "",
+      "Destination": l.destination ?? "",
+      "Duration": l.trip_duration ?? "",
+      "Travelers": l.travelers ?? "",
+      "Source": l.lead_source ?? "",
+      "Status": isAdmin ? (l.status ?? "") : (l.badge_stage ?? ""),
+      "Assigned To": employees.find((e) => e.user_id === l.assigned_employee_id)?.name ?? "",
+      "Itinerary Code": l.itinerary_code ?? "",
+      "Last Activity": l.last_activity_at ? format(new Date(l.last_activity_at), "MMM d, yyyy") : "",
+    }));
+    exportToExcel(
+      rows,
+      `leads-${format(fromDate, "yyyy-MM-dd")}-to-${format(toDate, "yyyy-MM-dd")}`,
+      "Leads"
+    );
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Header row: Title + Incoming Leads tab + New Lead button */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Leads</h1>
-        <div className="flex items-center gap-2">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" size="sm">
-                <CalendarIcon className="mr-2 h-4 w-4" />
-                {format(dateRange.from, "MMM d")} - {format(dateRange.to, "MMM d")}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="end">
-              <Calendar
-                mode="range"
-                selected={{ from: dateRange.from, to: dateRange.to }}
-                onSelect={(range) => { if (range?.from && range?.to) setDateRange({ from: range.from, to: range.to }); }}
-                className="p-3 pointer-events-auto"
-              />
-            </PopoverContent>
-          </Popover>
-          {isAdmin && (
+        {isAdmin && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant={inboxOpen ? "default" : "outline"}
+              size="sm"
+              onClick={() => setInboxOpen(!inboxOpen)}
+            >
+              <Inbox className="h-4 w-4 mr-1" />
+              Incoming Leads
+              {incomingLeads.length > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-xs font-semibold px-1.5 min-w-[20px] h-5 leading-none">
+                  {incomingLeads.length}
+                </span>
+              )}
+            </Button>
             <Dialog open={createOpen} onOpenChange={setCreateOpen}>
               <DialogTrigger asChild>
                 <Button size="sm"><Plus className="h-4 w-4 mr-1" /> New Lead</Button>
@@ -326,8 +382,53 @@ export default function LeadsPage() {
                 </Button>
               </DialogContent>
             </Dialog>
-          )}
+          </div>
+        )}
+      </div>
+
+      {/* Separate From / To date pickers */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground font-medium">From</span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm">
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {format(fromDate, "MMM d, yyyy")}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={fromDate}
+                onSelect={(d) => { if (d) setFromDate(d); }}
+                className="p-3 pointer-events-auto"
+              />
+            </PopoverContent>
+          </Popover>
         </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-muted-foreground font-medium">To</span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm">
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {format(toDate, "MMM d, yyyy")}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={toDate}
+                onSelect={(d) => { if (d) setToDate(d); }}
+                className="p-3 pointer-events-auto"
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={filteredLeads.length === 0}>
+          <Download className="h-4 w-4 mr-1" /> Export
+        </Button>
       </div>
 
       {/* Badge Pills */}
@@ -347,6 +448,45 @@ export default function LeadsPage() {
           </button>
         ))}
       </div>
+
+      {/* Incoming Leads Inbox panel (admin only, toggled) */}
+      {isAdmin && inboxOpen && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><Inbox className="h-5 w-5" /> Incoming Leads Inbox</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {incomingLeads.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No pending incoming leads</p>
+            ) : (
+              <div className="space-y-3">
+                {incomingLeads.map((il) => (
+                  <div key={il.id} className="p-4 rounded-lg border flex flex-col md:flex-row md:items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{il.name}</p>
+                      <p className="text-sm text-muted-foreground">{il.phone} · {il.source}</p>
+                      <p className="text-xs text-muted-foreground">{format(new Date(il.created_at!), "MMM d, yyyy HH:mm")}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Select value={assignMap[il.id] ?? ""} onValueChange={(v) => setAssignMap({ ...assignMap, [il.id]: v })}>
+                        <SelectTrigger className="w-40"><SelectValue placeholder="Assign to" /></SelectTrigger>
+                        <SelectContent>{employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}</SelectContent>
+                      </Select>
+                      <Button
+                        size="sm"
+                        disabled={!assignMap[il.id]}
+                        onClick={() => assignIncoming.mutate({ incomingId: il.id, employeeId: assignMap[il.id], name: il.name, phone: il.phone })}
+                      >
+                        Assign
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Search */}
       <div className="relative max-w-sm">

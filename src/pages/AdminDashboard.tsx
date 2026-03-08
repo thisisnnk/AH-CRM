@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Globe, MapPin, Anchor } from "lucide-react";
+import { Users, Globe, MapPin, Anchor, Download } from "lucide-react";
 import { format, subDays, endOfDay } from "date-fns";
+import * as XLSX from "xlsx";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
@@ -151,13 +152,157 @@ export default function AdminDashboard() {
     { label: "International Tour", value: "International Tour" },
   ];
 
+  const handleExport = () => {
+    const wb = XLSX.utils.book_new();
+    const dateRange = `${format(fromDate, "MMM d, yyyy")} — ${format(toDate, "MMM d, yyyy")}`;
+
+    // Helpers
+    const count = (pool: typeof leads, status: string) =>
+      pool.filter((l) => l.status === status).length;
+    const pct = (n: number, total: number) =>
+      total > 0 ? `${((n / total) * 100).toFixed(1)}%` : "0%";
+
+    const grandTotal = leads.length;
+
+    const categories = [
+      { label: "All", pool: leads },
+      { label: "Domestic Tour", pool: leads.filter((l) => (l as any).tour_category === "Domestic Tour") },
+      { label: "International Tour", pool: leads.filter((l) => (l as any).tour_category === "International Tour") },
+      { label: "Cruise", pool: leads.filter((l) => (l as any).tour_category === "Cruise") },
+    ];
+
+    // ── Sheet 1: Dashboard ────────────────────────────────────
+    const aoa: any[][] = [];
+
+    // Title block
+    aoa.push(["ADVENTURE HOLIDAYS CRM — DASHBOARD REPORT"]);
+    aoa.push([`Date Range: ${dateRange}`]);
+    aoa.push([`Generated: ${format(new Date(), "MMM d, yyyy HH:mm")}`]);
+    aoa.push([]);
+
+    // ── Section A: Lead Summary by Category ──
+    aoa.push(["LEAD SUMMARY BY CATEGORY"]);
+    aoa.push(["Category", "All Leads", "Open", "On Progress", "Converted", "Lost"]);
+    categories.forEach(({ label, pool }) => {
+      aoa.push([
+        label,
+        pool.length,
+        count(pool, "Open"),
+        count(pool, "On Progress"),
+        count(pool, "Converted"),
+        count(pool, "Lost"),
+      ]);
+    });
+
+    aoa.push([]);
+    aoa.push([]);
+
+    // ── Section B: Employee-wise Breakdown (with % of total) ──
+    aoa.push(["EMPLOYEE-WISE BREAKDOWN"]);
+    aoa.push(["Employee", "Total Leads", "% of Total", "Open", "On Progress", "Converted", "Lost"]);
+
+    const activeEmployees = employees
+      .map((emp) => ({
+        emp,
+        empLeads: leads.filter((l) => l.assigned_employee_id === emp.user_id),
+      }))
+      .filter(({ empLeads }) => empLeads.length > 0);
+
+    activeEmployees.forEach(({ emp, empLeads }) => {
+      aoa.push([
+        emp.name,
+        empLeads.length,
+        pct(empLeads.length, grandTotal),
+        count(empLeads, "Open"),
+        count(empLeads, "On Progress"),
+        count(empLeads, "Converted"),
+        count(empLeads, "Lost"),
+      ]);
+    });
+
+    // Totals row
+    aoa.push([
+      "TOTAL",
+      grandTotal,
+      "100%",
+      count(leads, "Open"),
+      count(leads, "On Progress"),
+      count(leads, "Converted"),
+      count(leads, "Lost"),
+    ]);
+
+    aoa.push([]);
+    aoa.push([]);
+
+    // ── Section C: Per-Employee Detail ──
+    aoa.push(["PER-EMPLOYEE LEAD DETAILS"]);
+
+    activeEmployees.forEach(({ emp, empLeads }) => {
+      // Employee sub-header
+      aoa.push([]);
+      aoa.push([emp.name.toUpperCase(), `Total: ${empLeads.length}`, pct(empLeads.length, grandTotal)]);
+      aoa.push(["Client ID", "Name", "Phone", "Destination", "Tour Category", "Status", "Itinerary Code", "Last Activity"]);
+      empLeads.forEach((l) => {
+        aoa.push([
+          l.client_id ?? "",
+          l.name,
+          l.phone,
+          l.destination ?? "",
+          (l as any).tour_category ?? "",
+          l.status ?? "",
+          l.itinerary_code ?? "",
+          l.last_activity_at ? format(new Date(l.last_activity_at), "MMM d, yyyy") : "",
+        ]);
+      });
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = [
+      { wch: 26 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 20 },
+      { wch: 14 }, { wch: 20 }, { wch: 16 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, "Dashboard");
+
+    // ── Sheet 2: Full Lead Details ────────────────────────────
+    const leadRows = leads.map((l) => ({
+      "Client ID": l.client_id ?? "",
+      "Enquiry Date": l.enquiry_date ? format(new Date(l.enquiry_date), "MMM d, yyyy") : "",
+      "Name": l.name,
+      "Phone": l.phone,
+      "WhatsApp": l.whatsapp ?? "",
+      "Email": l.email ?? "",
+      "City": l.city ?? "",
+      "State": l.state ?? "",
+      "Country": l.country ?? "",
+      "Destination": l.destination ?? "",
+      "Duration": l.trip_duration ?? "",
+      "Travelers": l.travelers ?? "",
+      "Tour Category": (l as any).tour_category ?? "",
+      "Source": l.lead_source ?? "",
+      "Status": l.status ?? "",
+      "Assigned To": employees.find((e) => e.user_id === l.assigned_employee_id)?.name ?? "",
+      "Itinerary Code": l.itinerary_code ?? "",
+      "Last Activity": l.last_activity_at ? format(new Date(l.last_activity_at), "MMM d, yyyy") : "",
+    }));
+    const leadsSheet = XLSX.utils.json_to_sheet(leadRows);
+    leadsSheet["!cols"] = [
+      { wch: 18 }, { wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 14 },
+      { wch: 24 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 18 },
+      { wch: 18 }, { wch: 10 }, { wch: 18 }, { wch: 18 }, { wch: 14 },
+      { wch: 20 }, { wch: 18 }, { wch: 14 },
+    ];
+    XLSX.utils.book_append_sheet(wb, leadsSheet, "Lead Details");
+
+    XLSX.writeFile(wb, `dashboard-${format(fromDate, "yyyy-MM-dd")}-to-${format(toDate, "yyyy-MM-dd")}.xlsx`);
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Dashboard</h1>
 
-        {/* Separate From / To date pickers */}
+        {/* Separate From / To date pickers + Export */}
         <div className="flex items-center gap-2">
           <Popover>
             <PopoverTrigger asChild>
@@ -196,6 +341,10 @@ export default function AdminDashboard() {
               />
             </PopoverContent>
           </Popover>
+
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={filteredLeads.length === 0}>
+            <Download className="h-4 w-4 mr-1" /> Export
+          </Button>
         </div>
       </div>
 

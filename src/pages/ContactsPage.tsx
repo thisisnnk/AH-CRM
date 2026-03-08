@@ -8,8 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
-import { Plus, Search, MapPin, Mail, Phone, Calendar as CalendarIcon, ExternalLink, Trash2 } from "lucide-react";
+import { Download, Plus, Search, MapPin, Mail, Phone, Calendar as CalendarIcon, ExternalLink, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { exportToExcel } from "@/utils/exportExcel";
 
 export default function ContactsPage() {
   const { role } = useAuth();
@@ -71,32 +72,51 @@ export default function ContactsPage() {
     return c.name.toLowerCase().includes(s) || c.phone.includes(s) || c.contact_id.toLowerCase().includes(s);
   });
 
+  const handleExport = () => {
+    const rows = filtered.map((c) => ({
+      "Contact ID": c.contact_id,
+      "Name": c.name,
+      "Phone": c.phone,
+      "WhatsApp": c.whatsapp ?? "",
+      "Email": c.email ?? "",
+      "City": c.city ?? "",
+      "State": c.state ?? "",
+      "Country": c.country ?? "",
+    }));
+    exportToExcel(rows, `contacts-export-${new Date().toISOString().slice(0, 10)}`, "Contacts");
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Contacts</h1>
-        {isAdmin && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4 mr-1" /> New Contact</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>Create Contact</DialogTitle></DialogHeader>
-              <div className="space-y-3">
-                <div><Label>Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-                <div><Label>Phone *</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
-                <div><Label>WhatsApp</Label><Input value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} /></div>
-                <div><Label>Email</Label><Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
-                <div><Label>City</Label><Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></div>
-                <div><Label>State</Label><Input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></div>
-                <div><Label>Country</Label><Input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} /></div>
-                <Button className="w-full" onClick={() => createContact.mutate()} disabled={!form.name || !form.phone || createContact.isPending}>
-                  Create Contact
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-        )}
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={filtered.length === 0}>
+            <Download className="h-4 w-4 mr-1" /> Export
+          </Button>
+          {isAdmin && (
+            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+              <DialogTrigger asChild>
+                <Button><Plus className="h-4 w-4 mr-1" /> New Contact</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>Create Contact</DialogTitle></DialogHeader>
+                <div className="space-y-3">
+                  <div><Label>Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
+                  <div><Label>Phone *</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
+                  <div><Label>WhatsApp</Label><Input value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} /></div>
+                  <div><Label>Email</Label><Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
+                  <div><Label>City</Label><Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></div>
+                  <div><Label>State</Label><Input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></div>
+                  <div><Label>Country</Label><Input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} /></div>
+                  <Button className="w-full" onClick={() => createContact.mutate()} disabled={!form.name || !form.phone || createContact.isPending}>
+                    Create Contact
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
       </div>
 
       <div className="relative max-w-sm">

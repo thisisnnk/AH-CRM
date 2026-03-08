@@ -144,7 +144,7 @@ export default function LeadDetailPage() {
   const [revFileUrl, setRevFileUrl] = useState<string | null>(null);
 
   // Task form state
-  const [taskForm, setTaskForm] = useState({ description: "", followUpDate: undefined as Date | undefined, notes: "", assignedTo: "" });
+  const [taskForm, setTaskForm] = useState({ followUpDate: undefined as Date | undefined, notes: "", assignedTo: "" });
 
   // Edit mode state
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
@@ -381,28 +381,29 @@ export default function LeadDetailPage() {
     mutationFn: async () => {
       if (!user || !taskForm.followUpDate) throw new Error("Missing required fields");
       const assignedTo = taskForm.assignedTo || lead?.assigned_employee_id || user.id;
+      const taskDescription = taskForm.notes.trim() || `Task for ${lead?.name ?? "lead"}`;
 
       const { error } = await supabase.from("tasks").insert({
-        description: taskForm.description, follow_up_date: taskForm.followUpDate.toISOString(),
+        description: taskDescription, follow_up_date: taskForm.followUpDate.toISOString(),
         notes: taskForm.notes || null, lead_id: id!, assigned_employee_id: assignedTo, created_by: user.id,
       });
       if (error) throw error;
 
       await supabase.from("activity_logs").insert({
-        lead_id: id!, user_id: user.id, action: "Created task", details: taskForm.description,
+        lead_id: id!, user_id: user.id, action: "Created task", details: taskDescription,
       });
 
       if (assignedTo !== user.id) {
         await sendNotification({
           recipientId: assignedTo, type: "task_assigned",
-          message: `New task for lead "${lead?.name ?? ""}": ${taskForm.description}`,
+          message: `New task for "${lead?.name ?? ""}" (${lead?.client_id ?? id}): ${taskForm.notes || taskDescription}`,
           leadId: id, isTask: true,
         });
       }
     },
     onSuccess: () => {
       toast({ title: "Task created" });
-      setTaskForm({ description: "", followUpDate: undefined, notes: "", assignedTo: "" });
+      setTaskForm({ followUpDate: undefined, notes: "", assignedTo: "" });
       queryClient.invalidateQueries({ queryKey: ["lead-tasks", id] });
       queryClient.invalidateQueries({ queryKey: ["activities", id] });
     },
@@ -796,17 +797,37 @@ export default function LeadDetailPage() {
         <CardContent className="space-y-4">
           {tasks.map((t) => (
             <div key={t.id} className={cn("p-3 rounded-lg border", t.status === "Completed" ? "bg-success/5" : new Date(t.follow_up_date) < new Date() ? "border-destructive/50 bg-destructive/5" : "")}>
-              <p className="font-medium text-sm">{t.description}</p>
-              <p className="text-xs text-muted-foreground">{format(new Date(t.follow_up_date), "MMM d, yyyy")} · {t.status}</p>
-              {t.notes && <p className="text-xs text-muted-foreground mt-1">{t.notes}</p>}
+              <div className="flex justify-between items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-muted-foreground">{format(new Date(t.follow_up_date), "MMM d, yyyy")} · {t.status}</p>
+                  {t.notes && <p className="text-sm mt-1">{t.notes}</p>}
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {t.proof_submitted && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-success/10 text-success font-medium whitespace-nowrap">Proof Submitted</span>
+                  )}
+                  {t.proof_url && (
+                    <a href={t.proof_url} target="_blank" rel="noopener" className="text-xs text-primary hover:underline whitespace-nowrap">View Proof</a>
+                  )}
+                </div>
+              </div>
             </div>
           ))}
           <Separator />
           <p className="font-medium text-sm">Add Task</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="col-span-2"><Label>Description</Label><Input value={taskForm.description} onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })} /></div>
+            {/* Client ID — read-only from lead */}
             <div>
-              <Label>Follow Up Date</Label>
+              <Label>Client ID</Label>
+              <Input value={lead.client_id ?? ""} readOnly className="bg-muted/40 cursor-default" placeholder="—" />
+            </div>
+            {/* Name — read-only from lead */}
+            <div>
+              <Label>Name</Label>
+              <Input value={lead.name ?? ""} readOnly className="bg-muted/40 cursor-default" />
+            </div>
+            <div>
+              <Label>Follow Up Date *</Label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="w-full justify-start">
@@ -826,9 +847,17 @@ export default function LeadDetailPage() {
                 </Select>
               </div>
             )}
-            <div className="col-span-2"><Label>Notes</Label><Textarea value={taskForm.notes} onChange={(e) => setTaskForm({ ...taskForm, notes: e.target.value })} /></div>
+            <div className="col-span-2">
+              <Label>Notes</Label>
+              <Textarea
+                value={taskForm.notes}
+                onChange={(e) => setTaskForm({ ...taskForm, notes: e.target.value })}
+                placeholder="Describe what needs to be done..."
+                className="min-h-[120px] resize-y"
+              />
+            </div>
           </div>
-          <Button onClick={() => createTask.mutate()} disabled={!taskForm.description || !taskForm.followUpDate || createTask.isPending}>
+          <Button onClick={() => createTask.mutate()} disabled={!taskForm.followUpDate || createTask.isPending}>
             Add Task
           </Button>
         </CardContent>
