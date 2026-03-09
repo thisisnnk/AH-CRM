@@ -12,6 +12,7 @@ import { Plus, Edit, UserX, UserCheck, Phone, Mail, User, Calendar, Shield, KeyR
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { Separator } from "@/components/ui/separator";
+import { PageLoadingBar } from "@/components/PageLoadingBar";
 
 const SUPER_ADMIN_EMAIL = "admin@adventureholidays.co";
 
@@ -22,7 +23,7 @@ export default function ConsolePage() {
   const [editingUser, setEditingUser] = useState<any>(null);
   const [form, setForm] = useState({ name: "", email: "", password: "", whatsapp: "" });
 
-  const { data: employees = [] } = useQuery({
+  const { data: employees = [], isLoading: employeesLoading } = useQuery({
     queryKey: ["all-employees"],
     queryFn: async () => {
       const { data: profiles } = await supabase
@@ -36,6 +37,7 @@ export default function ConsolePage() {
 
       return profiles.map((p) => ({ ...p, role: roleMap[p.user_id] ?? "employee" }));
     },
+    staleTime: 2 * 60_000,
   });
 
   const createEmployee = useMutation({
@@ -138,6 +140,7 @@ export default function ConsolePage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <PageLoadingBar loading={employeesLoading} />
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -301,7 +304,10 @@ export default function ConsolePage() {
         })}
       </div>
 
-      {employees.length === 0 && (
+      {employeesLoading && employees.length === 0 && (
+        <div className="text-center py-16 text-muted-foreground">Loading employees...</div>
+      )}
+      {!employeesLoading && employees.length === 0 && (
         <div className="text-center py-16 text-muted-foreground">
           No employees yet. Click "Create Employee" to add one.
         </div>

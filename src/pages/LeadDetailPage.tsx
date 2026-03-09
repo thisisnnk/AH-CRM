@@ -18,6 +18,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { sendNotification } from "@/utils/notificationHelper";
+import { sendWhatsAppToEmployee } from "@/utils/sendWhatsAppMessage";
 
 // ── File Upload Widget ─────────────────────────────────────────
 function FileUploadWidget({
@@ -207,6 +208,7 @@ export default function LeadDetailPage() {
       return data;
     },
     enabled: !!id,
+    staleTime: 30_000,
   });
 
   const { data: revisions = [] } = useQuery({
@@ -259,10 +261,15 @@ export default function LeadDetailPage() {
 
   // ── Mutations ──
   const updateLead = useMutation({
-    mutationFn: async (updates: Record<string, any>) => {
-      const { error } = await supabase.from("leads").update(updates).eq("id", id!);
+    mutationFn: async (updates: Record<string, any> & { _logAction?: string }) => {
+      const { _logAction, ...dbUpdates } = updates;
+      const { error } = await supabase.from("leads").update(dbUpdates).eq("id", id!);
       if (error) throw error;
-      // No activity log for personal/lead info edits — only itinerary, revisions & tasks are logged
+      if (_logAction && user) {
+        await supabase.from("activity_logs").insert({
+          lead_id: id!, user_id: user.id, action: _logAction,
+        });
+      }
     },
     onSuccess: () => {
       toast({ title: "Changes saved" });
@@ -394,11 +401,15 @@ export default function LeadDetailPage() {
       });
 
       if (assignedTo !== user.id) {
-        await sendNotification({
-          recipientId: assignedTo, type: "task_assigned",
-          message: `New task for "${lead?.name ?? ""}" (${lead?.client_id ?? id}): ${taskForm.notes || taskDescription}`,
-          leadId: id, isTask: true,
-        });
+        const waMsg = `Hello! A new task has been assigned to you.\nLead: ${lead?.name ?? ""} (${lead?.client_id ?? id})\nTask: ${taskForm.notes || taskDescription}\nFollow-up: ${taskForm.followUpDate ? taskForm.followUpDate.toLocaleDateString() : "—"}`;
+        await Promise.all([
+          sendNotification({
+            recipientId: assignedTo, type: "task_assigned",
+            message: `New task for "${lead?.name ?? ""}" (${lead?.client_id ?? id}): ${taskForm.notes || taskDescription}`,
+            leadId: id, isTask: true,
+          }),
+          sendWhatsAppToEmployee(assignedTo, waMsg),
+        ]);
       }
     },
     onSuccess: () => {
@@ -448,6 +459,10 @@ export default function LeadDetailPage() {
     };
     if (leadInfoForm.status === "Lost" || leadInfoForm.status === "Converted") {
       updates.badge_stage = leadInfoForm.status;
+    }
+    if (lead && leadInfoForm.status !== lead.status) {
+      updates._logAction = `Changed status to ${leadInfoForm.status}`;
+      updates.last_activity_at = new Date().toISOString();
     }
     updateLead.mutate(updates, {
       onSuccess: () => { setIsEditingLeadInfo(false); setIsSavingLeadInfo(false); },
@@ -871,7 +886,8 @@ export default function LeadDetailPage() {
             const relevantActivities = activities.filter((a) =>
               a.action === "Submitted itinerary" ||
               a.action === "Created task" ||
-              (a.action ?? "").startsWith("Added Revision")
+              (a.action ?? "").startsWith("Added Revision") ||
+              (a.action ?? "").startsWith("Changed status to")
             );
             return relevantActivities.length === 0 ? (
             <p className="text-sm text-muted-foreground">No activity recorded yet</p>

@@ -11,6 +11,9 @@ import { toast } from "@/hooks/use-toast";
 import { Download, Plus, Search, MapPin, Mail, Phone, Calendar as CalendarIcon, ExternalLink, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { exportToExcel } from "@/utils/exportExcel";
+import { PhoneInput, isPhoneValid } from "@/components/PhoneInput";
+import { PageLoadingBar } from "@/components/PageLoadingBar";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function ContactsPage() {
   const { role } = useAuth();
@@ -18,13 +21,22 @@ export default function ContactsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 50;
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "" });
+  const [phoneDialCode, setPhoneDialCode] = useState("+91");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [waDialCode, setWaDialCode] = useState("+91");
+  const [waNumber, setWaNumber] = useState("");
 
   const { data: contacts = [], isLoading: contactsLoading } = useQuery({
     queryKey: ["contacts"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("contacts").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("id,contact_id,name,phone,email,city,created_at")
+        .order("created_at", { ascending: false });
       if (error) {
         console.error("Contacts fetch error:", error);
         toast({ title: "Error loading contacts", description: error.message, variant: "destructive" });
@@ -32,9 +44,12 @@ export default function ContactsPage() {
       }
       return data ?? [];
     },
-    refetchOnMount: "always",
+    staleTime: 60_000,
     retry: 2,
   });
+
+  const fullPhone = phoneDialCode + phoneNumber;
+  const fullWa = waNumber ? waDialCode + waNumber : "";
 
   const createContact = useMutation({
     mutationFn: async () => {
@@ -43,8 +58,8 @@ export default function ContactsPage() {
       const { error } = await supabase.from("contacts").insert({
         contact_id: contactId,
         name: form.name,
-        phone: form.phone,
-        whatsapp: form.whatsapp || null,
+        phone: fullPhone,
+        whatsapp: fullWa || null,
         email: form.email || null,
         city: form.city || null,
         state: form.state || null,
@@ -56,6 +71,8 @@ export default function ContactsPage() {
       toast({ title: "Contact created" });
       setCreateOpen(false);
       setForm({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "" });
+      setPhoneDialCode("+91"); setPhoneNumber("");
+      setWaDialCode("+91"); setWaNumber("");
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },
     onError: (err: any) => {
@@ -71,6 +88,9 @@ export default function ContactsPage() {
     const s = search.toLowerCase();
     return c.name.toLowerCase().includes(s) || c.phone.includes(s) || c.contact_id.toLowerCase().includes(s);
   });
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const handleExport = () => {
     const rows = filtered.map((c) => ({
@@ -88,6 +108,7 @@ export default function ContactsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <PageLoadingBar loading={contactsLoading} />
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Contacts</h1>
         <div className="flex items-center gap-2">
@@ -103,13 +124,23 @@ export default function ContactsPage() {
                 <DialogHeader><DialogTitle>Create Contact</DialogTitle></DialogHeader>
                 <div className="space-y-3">
                   <div><Label>Name *</Label><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
-                  <div><Label>Phone *</Label><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
-                  <div><Label>WhatsApp</Label><Input value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} /></div>
+                  <PhoneInput
+                    label="Phone" required
+                    dialCode={phoneDialCode} number={phoneNumber}
+                    onDialCodeChange={setPhoneDialCode}
+                    onNumberChange={setPhoneNumber}
+                  />
+                  <PhoneInput
+                    label="WhatsApp"
+                    dialCode={waDialCode} number={waNumber}
+                    onDialCodeChange={setWaDialCode}
+                    onNumberChange={setWaNumber}
+                  />
                   <div><Label>Email</Label><Input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
                   <div><Label>City</Label><Input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} /></div>
                   <div><Label>State</Label><Input value={form.state} onChange={(e) => setForm({ ...form, state: e.target.value })} /></div>
                   <div><Label>Country</Label><Input value={form.country} onChange={(e) => setForm({ ...form, country: e.target.value })} /></div>
-                  <Button className="w-full" onClick={() => createContact.mutate()} disabled={!form.name || !form.phone || createContact.isPending}>
+                  <Button className="w-full" onClick={() => createContact.mutate()} disabled={!form.name || !isPhoneValid(phoneDialCode, phoneNumber) || createContact.isPending || (waNumber.length > 0 && !isPhoneValid(waDialCode, waNumber))}>
                     Create Contact
                   </Button>
                 </div>
@@ -121,7 +152,7 @@ export default function ContactsPage() {
 
       <div className="relative max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input placeholder="Search contacts..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
+        <Input placeholder="Search contacts..." value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} className="pl-9" />
       </div>
 
       <div className="overflow-x-auto rounded-lg border">
@@ -137,25 +168,51 @@ export default function ContactsPage() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((c) => (
+            {paginated.map((c) => (
               <tr key={c.id} className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => navigate(`/contacts/${c.id}`)}>
                 <td className="py-3 px-4 font-medium">{c.contact_id}</td>
                 <td className="py-3 px-4 font-medium">{c.name}</td>
                 <td className="py-3 px-4">{c.phone}</td>
                 <td className="py-3 px-4">{c.email ?? "—"}</td>
                 <td className="py-3 px-4">{c.city ?? "—"}</td>
-
               </tr>
             ))}
-            {contactsLoading && (
-              <tr><td colSpan={5} className="py-8 text-center text-muted-foreground">Loading contacts...</td></tr>
-            )}
+            {contactsLoading && Array.from({ length: 8 }).map((_, i) => (
+              <tr key={`skel-${i}`} className="border-b">
+                {Array.from({ length: 5 }).map((_, j) => (
+                  <td key={j} className="py-3 px-4"><Skeleton className="h-4 w-full" /></td>
+                ))}
+              </tr>
+            ))}
             {!contactsLoading && filtered.length === 0 && (
               <tr><td colSpan={5} className="py-8 text-center text-muted-foreground">No contacts found</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Pagination controls */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between text-sm text-muted-foreground pt-1">
+          <span>{filtered.length} contacts · page {page + 1} of {totalPages}</span>
+          <div className="flex gap-2">
+            <button
+              className="px-3 py-1 rounded border disabled:opacity-40 hover:bg-muted"
+              disabled={page === 0}
+              onClick={() => setPage(page - 1)}
+            >
+              Previous
+            </button>
+            <button
+              className="px-3 py-1 rounded border disabled:opacity-40 hover:bg-muted"
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage(page + 1)}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

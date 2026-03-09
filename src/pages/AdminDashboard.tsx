@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { CalendarIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { PageLoadingBar } from "@/components/PageLoadingBar";
 
 const STATUS_LIST = ["Open", "On Progress", "Converted", "Lost"] as const;
 
@@ -101,16 +102,17 @@ export default function AdminDashboard() {
   const [toDate, setToDate] = useState<Date>(new Date());
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
-  const { data: leads = [] } = useQuery({
+  const { data: leads = [], isLoading: leadsLoading } = useQuery({
     queryKey: ["dashboard-leads", fromDate, toDate],
     queryFn: async () => {
       const { data } = await supabase
         .from("leads")
-        .select("*")
+        .select("id,status,tour_category,assigned_employee_id,name,lead_source,created_at")
         .gte("created_at", fromDate.toISOString())
         .lte("created_at", endOfDay(toDate).toISOString());
       return data ?? [];
     },
+    staleTime: 2 * 60_000,
   });
 
   const { data: employees = [] } = useQuery({
@@ -119,6 +121,7 @@ export default function AdminDashboard() {
       const { data } = await supabase.from("profiles").select("*");
       return data ?? [];
     },
+    staleTime: 5 * 60_000,
   });
 
   // Stat card counts
@@ -298,6 +301,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <PageLoadingBar loading={leadsLoading} />
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Dashboard</h1>

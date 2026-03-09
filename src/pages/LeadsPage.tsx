@@ -18,6 +18,10 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useNavigate } from "react-router-dom";
 import { sendNotification } from "@/utils/notificationHelper";
+import { sendWhatsAppToEmployee } from "@/utils/sendWhatsAppMessage";
+import { PhoneInput, isPhoneValid } from "@/components/PhoneInput";
+import { PageLoadingBar } from "@/components/PageLoadingBar";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const sourceOptions = ["Instagram", "Website", "Referral", "Office Direct Lead"] as const;
 
@@ -41,13 +45,17 @@ export default function LeadsPage() {
     name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "",
     destination: "", travelers: "", trip_duration: "", lead_source: "", assigned_employee_id: "",
   });
+  const [phoneDialCode, setPhoneDialCode] = useState("+91");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [waDialCode, setWaDialCode] = useState("+91");
+  const [waNumber, setWaNumber] = useState("");
 
   const { data: leads = [], isLoading: leadsLoading } = useQuery({
     queryKey: ["leads", fromDate, toDate, user?.id, role],
     queryFn: async () => {
       let query = supabase
         .from("leads")
-        .select("*")
+        .select("id,client_id,enquiry_date,lead_source,itinerary_code,name,phone,destination,trip_duration,assigned_employee_id,travelers,status,badge_stage,last_activity_at,created_at")
         .gte("created_at", fromDate.toISOString())
         .lte("created_at", endOfDay(toDate).toISOString())
         .order("created_at", { ascending: false });
@@ -65,7 +73,7 @@ export default function LeadsPage() {
       return data ?? [];
     },
     enabled: !!user,
-    refetchOnMount: "always",
+    staleTime: 60_000,
     retry: 2,
   });
 
@@ -75,7 +83,7 @@ export default function LeadsPage() {
       const { data } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
       return data ?? [];
     },
-    refetchOnMount: "always",
+    staleTime: 5 * 60_000,
   });
 
   const { data: incomingLeads = [] } = useQuery({
@@ -117,6 +125,9 @@ export default function LeadsPage() {
     return `${prefix}${nextSeq.toString().padStart(4, "0")}`;
   };
 
+  const fullPhone = phoneDialCode + phoneNumber;
+  const fullWa = waNumber ? waDialCode + waNumber : "";
+
   const createLead = useMutation({
     mutationFn: async () => {
       const clientId = await generateClientId();
@@ -124,8 +135,8 @@ export default function LeadsPage() {
       const { data: contactData, error: contactErr } = await supabase.from("contacts").insert({
         contact_id: clientId,
         name: newLead.name,
-        phone: newLead.phone,
-        whatsapp: newLead.whatsapp || null,
+        phone: fullPhone,
+        whatsapp: fullWa || null,
         email: newLead.email || null,
         city: newLead.city || null,
         state: newLead.state || null,
@@ -137,8 +148,8 @@ export default function LeadsPage() {
         client_id: clientId,
         contact_id: contactData.id,
         name: newLead.name,
-        phone: newLead.phone,
-        whatsapp: newLead.whatsapp || null,
+        phone: fullPhone,
+        whatsapp: fullWa || null,
         email: newLead.email || null,
         city: newLead.city || null,
         state: newLead.state || null,
@@ -152,18 +163,24 @@ export default function LeadsPage() {
       if (leadErr) throw leadErr;
 
       if (newLead.assigned_employee_id) {
-        await sendNotification({
-          recipientId: newLead.assigned_employee_id,
-          type: "lead_assigned",
-          message: `New lead "${newLead.name}" has been assigned to you`,
-          leadId: undefined,
-        });
+        const waMsg = `Hello! A new lead has been assigned to you.\nName: ${newLead.name}\nPhone: ${fullPhone}\nSource: ${newLead.lead_source}`;
+        await Promise.all([
+          sendNotification({
+            recipientId: newLead.assigned_employee_id,
+            type: "lead_assigned",
+            message: `New lead "${newLead.name}" has been assigned to you`,
+            leadId: undefined,
+          }),
+          sendWhatsAppToEmployee(newLead.assigned_employee_id, waMsg),
+        ]);
       }
     },
     onSuccess: () => {
       toast({ title: "Lead created", description: "Contact was also created automatically." });
       setCreateOpen(false);
       setNewLead({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "", destination: "", travelers: "", trip_duration: "", lead_source: "", assigned_employee_id: "" });
+      setPhoneDialCode("+91"); setPhoneNumber("");
+      setWaDialCode("+91"); setWaNumber("");
       setToDate(new Date());
       queryClient.invalidateQueries({ queryKey: ["leads"] });
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
@@ -201,12 +218,16 @@ export default function LeadsPage() {
       const { data: leadData } = await supabase.from("leads").select("name").eq("id", id).single();
       const leadName = leadData?.name ?? "a lead";
 
-      await sendNotification({
-        recipientId: employeeId,
-        type: "lead_reassigned",
-        message: `Lead "${leadName}" has been reassigned to you`,
-        leadId: id,
-      });
+      const waMsg = `Hello! Lead "${leadName}" has been reassigned to you.`;
+      await Promise.all([
+        sendNotification({
+          recipientId: employeeId,
+          type: "lead_reassigned",
+          message: `Lead "${leadName}" has been reassigned to you`,
+          leadId: id,
+        }),
+        sendWhatsAppToEmployee(employeeId, waMsg),
+      ]);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["leads"] });
@@ -327,6 +348,7 @@ export default function LeadsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <PageLoadingBar loading={leadsLoading} />
       {/* Header row: Title + Incoming Leads tab + New Lead button */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Leads</h1>
@@ -353,8 +375,22 @@ export default function LeadsPage() {
                 <DialogHeader><DialogTitle>Create Lead</DialogTitle></DialogHeader>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="col-span-2"><Label>Name *</Label><Input value={newLead.name} onChange={(e) => setNewLead({ ...newLead, name: e.target.value })} /></div>
-                  <div><Label>Phone *</Label><Input value={newLead.phone} onChange={(e) => setNewLead({ ...newLead, phone: e.target.value })} /></div>
-                  <div><Label>WhatsApp</Label><Input value={newLead.whatsapp} onChange={(e) => setNewLead({ ...newLead, whatsapp: e.target.value })} /></div>
+                  <div className="col-span-2">
+                    <PhoneInput
+                      label="Phone" required
+                      dialCode={phoneDialCode} number={phoneNumber}
+                      onDialCodeChange={setPhoneDialCode}
+                      onNumberChange={setPhoneNumber}
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <PhoneInput
+                      label="WhatsApp"
+                      dialCode={waDialCode} number={waNumber}
+                      onDialCodeChange={setWaDialCode}
+                      onNumberChange={setWaNumber}
+                    />
+                  </div>
                   <div><Label>Email</Label><Input value={newLead.email} onChange={(e) => setNewLead({ ...newLead, email: e.target.value })} /></div>
                   <div><Label>City</Label><Input value={newLead.city} onChange={(e) => setNewLead({ ...newLead, city: e.target.value })} /></div>
                   <div><Label>State</Label><Input value={newLead.state} onChange={(e) => setNewLead({ ...newLead, state: e.target.value })} /></div>
@@ -377,8 +413,8 @@ export default function LeadsPage() {
                     </Select>
                   </div>
                 </div>
-                <Button className="w-full mt-4" onClick={() => createLead.mutate()} disabled={!newLead.name || !newLead.phone || !newLead.lead_source || !newLead.assigned_employee_id || createLead.isPending}>
-                  Create Lead
+                <Button className="w-full mt-4" onClick={() => createLead.mutate()} disabled={!newLead.name || !isPhoneValid(phoneDialCode, phoneNumber) || !newLead.lead_source || !newLead.assigned_employee_id || createLead.isPending || (waNumber.length > 0 && !isPhoneValid(waDialCode, waNumber))}>
+                  {createLead.isPending ? "Creating lead..." : "Create Lead"}
                 </Button>
               </DialogContent>
             </Dialog>
@@ -639,9 +675,13 @@ export default function LeadsPage() {
                 )}
               </tr>
             ))}
-            {leadsLoading && (
-              <tr><td colSpan={12} className="py-8 text-center text-muted-foreground">Loading leads...</td></tr>
-            )}
+            {leadsLoading && Array.from({ length: 8 }).map((_, i) => (
+              <tr key={`skel-${i}`} className="border-b">
+                {Array.from({ length: isAdmin ? 11 : 10 }).map((_, j) => (
+                  <td key={j} className="py-3 px-6"><Skeleton className="h-4 w-full" /></td>
+                ))}
+              </tr>
+            ))}
             {!leadsLoading && filteredLeads.length === 0 && (
               <tr><td colSpan={12} className="py-8 text-center text-muted-foreground">No leads found</td></tr>
             )}

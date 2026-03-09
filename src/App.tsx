@@ -17,7 +17,16 @@ import NotFound from "./pages/NotFound";
 import LeadsActivityPage from "./pages/LeadsActivityPage";
 import { ProtectedLayout, AdminRoute } from "./components/ProtectedLayout";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,           // cached data stays fresh for 30 s — no refetch on every navigation
+      gcTime: 10 * 60_000,         // keep unused data in memory for 10 min
+      retry: 1,
+      refetchOnWindowFocus: false, // don't trigger a refetch just because user switched tabs
+    },
+  },
+});
 
 function RootRedirect() {
   const { user, loading } = useAuth();

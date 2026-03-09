@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { format } from "date-fns";
@@ -9,11 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Filter, Search, CalendarIcon, Clock } from "lucide-react";
+import { PageLoadingBar } from "@/components/PageLoadingBar";
 
 const isRelevantAction = (action: string) =>
   action === "Submitted itinerary" ||
   action === "Created task" ||
-  action.startsWith("Added Revision");
+  action.startsWith("Added Revision") ||
+  action.startsWith("Changed status to");
 
 export default function LeadsActivityPage() {
   const navigate = useNavigate();
@@ -41,9 +43,11 @@ export default function LeadsActivityPage() {
       const { data } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
       return data ?? [];
     },
+    staleTime: 5 * 60_000,
   });
 
-  const { data: activities = [], isLoading: activitiesLoading } = useQuery({
+  // Raw activity logs + lead data — fetched independently, no employee dependency
+  const { data: rawActivities = [], isLoading: activitiesLoading } = useQuery({
     queryKey: ["all-activity-logs"],
     queryFn: async () => {
       const { data: logs } = await supabase
@@ -61,7 +65,6 @@ export default function LeadsActivityPage() {
         .in("id", leadIds);
 
       const leadMap = Object.fromEntries((leads ?? []).map((l) => [l.id, l]));
-      const empMap = Object.fromEntries(employees.map((e) => [e.user_id, e.name]));
 
       return logs
         .filter((a) => isRelevantAction(a.action ?? ""))
@@ -71,14 +74,23 @@ export default function LeadsActivityPage() {
             ...a,
             leadName: lead?.name ?? "—",
             clientId: lead?.client_id ?? "—",
-            assignedTo: empMap[lead?.assigned_employee_id ?? ""] ?? "—",
             assignedEmployeeId: lead?.assigned_employee_id ?? null,
+            performedById: a.user_id ?? null,
           };
         });
     },
-    enabled: employees.length > 0,
-    refetchOnMount: "always",
+    staleTime: 60_000,
   });
+
+  // Enrich with employee names once employees are loaded (names show "—" until then)
+  const activities = useMemo(() => {
+    const empMap = Object.fromEntries(employees.map((e) => [e.user_id, e.name]));
+    return rawActivities.map((a) => ({
+      ...a,
+      assignedTo: empMap[a.assignedEmployeeId ?? ""] ?? "—",
+      performedBy: empMap[a.performedById ?? ""] ?? "—",
+    }));
+  }, [rawActivities, employees]);
 
   const { data: inactiveLeads = [], isLoading: inactiveLoading } = useQuery({
     queryKey: ["inactive-leads-activity"],
@@ -89,7 +101,7 @@ export default function LeadsActivityPage() {
         .eq("status", "On Progress");
       return data ?? [];
     },
-    refetchOnMount: "always",
+    staleTime: 60_000,
   });
 
   // ── Realtime subscription: refresh activity table on any insert ──
@@ -111,7 +123,7 @@ export default function LeadsActivityPage() {
   }, [queryClient]);
 
   // ── Inactivity categorization ──
-  const empMap = Object.fromEntries(employees.map((e) => [e.user_id, e.name]));
+  const empMap = useMemo(() => Object.fromEntries(employees.map((e) => [e.user_id, e.name])), [employees]);
 
   const categorizedInactive = inactiveLeads
     .map((l) => {
@@ -138,7 +150,7 @@ export default function LeadsActivityPage() {
 
   // ── Activity Tracker filtering ──
   const filteredActivities = activities.filter((a) => {
-    if (filterAssignees.length > 0 && !filterAssignees.includes(a.assignedEmployeeId ?? "")) return false;
+    if (filterAssignees.length > 0 && !filterAssignees.includes(a.performedById ?? "")) return false;
 
     if (dateFrom || dateTo) {
       if (!a.timestamp) return false;
@@ -160,7 +172,8 @@ export default function LeadsActivityPage() {
         a.leadName.toLowerCase().includes(s) ||
         a.clientId.toLowerCase().includes(s) ||
         (a.action ?? "").toLowerCase().includes(s) ||
-        a.assignedTo.toLowerCase().includes(s)
+        a.assignedTo.toLowerCase().includes(s) ||
+        a.performedBy.toLowerCase().includes(s)
       );
     }
     return true;
@@ -177,6 +190,7 @@ export default function LeadsActivityPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <PageLoadingBar loading={activitiesLoading || inactiveLoading} />
       <h1 className="text-2xl font-bold">Leads Activity</h1>
 
       <Tabs defaultValue="activity">
@@ -321,11 +335,12 @@ export default function LeadsActivityPage() {
                   <th className="text-left py-3 px-4 whitespace-nowrap">Activity</th>
                   <th className="text-left py-3 px-4 whitespace-nowrap">Lead Name</th>
                   <th className="text-left py-3 px-4 whitespace-nowrap">Client ID</th>
+                  <th className="text-left py-3 px-4 whitespace-nowrap">Assigned To</th>
 
-                  {/* Assigned To with employee filter */}
+                  {/* Performed By with employee filter */}
                   <th className="text-left py-3 px-4 whitespace-nowrap">
                     <span className="inline-flex items-center gap-1">
-                      Assigned To
+                      Performed By
                       <Popover>
                         <PopoverTrigger asChild>
                           <button
@@ -369,9 +384,9 @@ export default function LeadsActivityPage() {
               </thead>
               <tbody>
                 {activitiesLoading ? (
-                  <tr><td colSpan={6} className="py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">Loading...</td></tr>
                 ) : filteredActivities.length === 0 ? (
-                  <tr><td colSpan={6} className="py-8 text-center text-muted-foreground">No activities found</td></tr>
+                  <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">No activities found</td></tr>
                 ) : (
                   filteredActivities.map((a) => (
                     <tr
@@ -388,7 +403,8 @@ export default function LeadsActivityPage() {
                       <td className="py-3 px-4 whitespace-nowrap font-medium">{a.action}</td>
                       <td className="py-3 px-4 whitespace-nowrap">{a.leadName}</td>
                       <td className="py-3 px-4 whitespace-nowrap text-muted-foreground">{a.clientId}</td>
-                      <td className="py-3 px-4 whitespace-nowrap">{a.assignedTo}</td>
+                      <td className="py-3 px-4 whitespace-nowrap text-muted-foreground">{a.assignedTo}</td>
+                      <td className="py-3 px-4 whitespace-nowrap font-medium">{a.performedBy}</td>
                     </tr>
                   ))
                 )}

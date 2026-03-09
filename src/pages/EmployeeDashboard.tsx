@@ -11,6 +11,7 @@ import { toast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
+import { PageLoadingBar } from "@/components/PageLoadingBar";
 
 export default function EmployeeDashboard() {
   const { user } = useAuth();
@@ -21,7 +22,7 @@ export default function EmployeeDashboard() {
   const [proofFile, setProofFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: leads = [] } = useQuery({
+  const { data: leads = [], isLoading: leadsLoading } = useQuery({
     queryKey: ["my-leads", user?.id],
     queryFn: async () => {
       if (!user) return [];
@@ -29,6 +30,8 @@ export default function EmployeeDashboard() {
       return data ?? [];
     },
     enabled: !!user,
+    refetchOnMount: "always",
+    staleTime: 30_000,
   });
 
   const { data: tasks = [] } = useQuery({
@@ -43,6 +46,8 @@ export default function EmployeeDashboard() {
       return data ?? [];
     },
     enabled: !!user,
+    refetchOnMount: "always",
+    staleTime: 30_000,
   });
 
   const submitProof = useMutation({
@@ -87,6 +92,7 @@ export default function EmployeeDashboard() {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <PageLoadingBar loading={leadsLoading} />
       <h1 className="text-2xl font-bold">My Dashboard</h1>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
