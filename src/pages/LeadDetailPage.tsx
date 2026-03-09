@@ -18,7 +18,6 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { sendNotification } from "@/utils/notificationHelper";
-import { sendWhatsAppToEmployee } from "@/utils/sendWhatsAppMessage";
 
 // ── File Upload Widget ─────────────────────────────────────────
 function FileUploadWidget({
@@ -401,15 +400,11 @@ export default function LeadDetailPage() {
       });
 
       if (assignedTo !== user.id) {
-        const waMsg = `Hello! A new task has been assigned to you.\nLead: ${lead?.name ?? ""} (${lead?.client_id ?? id})\nTask: ${taskForm.notes || taskDescription}\nFollow-up: ${taskForm.followUpDate ? taskForm.followUpDate.toLocaleDateString() : "—"}`;
-        await Promise.all([
-          sendNotification({
-            recipientId: assignedTo, type: "task_assigned",
-            message: `New task for "${lead?.name ?? ""}" (${lead?.client_id ?? id}): ${taskForm.notes || taskDescription}`,
-            leadId: id, isTask: true,
-          }),
-          sendWhatsAppToEmployee(assignedTo, waMsg),
-        ]);
+        await sendNotification({
+          recipientId: assignedTo, type: "task_assigned",
+          message: `New task for "${lead?.name ?? ""}" (${lead?.client_id ?? id}): ${taskForm.notes || taskDescription}`,
+          leadId: id, isTask: true,
+        });
       }
     },
     onSuccess: () => {

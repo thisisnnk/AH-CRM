@@ -162,16 +162,12 @@ export default function LeadsPage() {
       if (leadErr) throw leadErr;
 
       if (newLead.assigned_employee_id) {
-        const waMsg = `Hello! A new lead has been assigned to you.\nName: ${newLead.name}\nPhone: ${fullPhone}\nSource: ${newLead.lead_source}`;
-        await Promise.all([
-          sendNotification({
-            recipientId: newLead.assigned_employee_id,
-            type: "lead_assigned",
-            message: `New lead "${newLead.name}" has been assigned to you`,
-            leadId: undefined,
-          }),
-          sendWhatsAppToEmployee(newLead.assigned_employee_id, waMsg),
-        ]);
+        await sendNotification({
+          recipientId: newLead.assigned_employee_id,
+          type: "lead_assigned",
+          message: `New lead "${newLead.name}" has been assigned to you`,
+          leadId: undefined,
+        });
       }
     },
     onSuccess: () => {
@@ -217,16 +213,12 @@ export default function LeadsPage() {
       const { data: leadData } = await supabase.from("leads").select("name").eq("id", id).single();
       const leadName = leadData?.name ?? "a lead";
 
-      const waMsg = `Hello! Lead "${leadName}" has been reassigned to you.`;
-      await Promise.all([
-        sendNotification({
-          recipientId: employeeId,
-          type: "lead_reassigned",
-          message: `Lead "${leadName}" has been reassigned to you`,
-          leadId: id,
-        }),
-        sendWhatsAppToEmployee(employeeId, waMsg),
-      ]);
+      await sendNotification({
+        recipientId: employeeId,
+        type: "lead_reassigned",
+        message: `Lead "${leadName}" has been reassigned to you`,
+        leadId: id,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["leads"] });

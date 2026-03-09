@@ -17,7 +17,6 @@ import { CalendarIcon, ExternalLink, Filter } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { sendNotification } from "@/utils/notificationHelper";
-import { sendWhatsAppToEmployee } from "@/utils/sendWhatsAppMessage";
 
 export default function TasksPage() {
   const { user } = useAuth();
@@ -125,17 +124,13 @@ export default function TasksPage() {
 
       if (assignedEmp && lead) {
         const taskDescription = notes.trim() || `Task for ${lead.name}`;
-        const waMsg = `Hello! A new task has been assigned to you.\nLead: ${lead.name} (${lead.client_id ?? lead.id})\nTask: ${taskDescription}\nFollow-up: ${followUpDate ? format(followUpDate, "PPP") : "—"}`;
-        await Promise.all([
-          sendNotification({
-            recipientId: assignedEmp,
-            type: "task_assigned",
-            message: `New task assigned to you for "${lead.name}" (${lead.client_id ?? lead.id})`,
-            leadId: taskForm.leadId,
-            isTask: true,
-          }),
-          sendWhatsAppToEmployee(assignedEmp, waMsg),
-        ]);
+        await sendNotification({
+          recipientId: assignedEmp,
+          type: "task_assigned",
+          message: `New task assigned to you for "${lead.name}" (${lead.client_id ?? lead.id})`,
+          leadId: taskForm.leadId,
+          isTask: true,
+        });
       }
       queryClient.invalidateQueries({ queryKey: ["tasks-incomplete"] });
       queryClient.invalidateQueries({ queryKey: ["tasks-completed"] });
