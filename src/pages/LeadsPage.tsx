@@ -18,7 +18,6 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useNavigate } from "react-router-dom";
 import { sendNotification } from "@/utils/notificationHelper";
-import { sendWhatsAppToEmployee } from "@/utils/sendWhatsAppMessage";
 import { PhoneInput, isPhoneValid } from "@/components/PhoneInput";
 import { PageLoadingBar } from "@/components/PageLoadingBar";
 import { Skeleton } from "@/components/ui/skeleton";
