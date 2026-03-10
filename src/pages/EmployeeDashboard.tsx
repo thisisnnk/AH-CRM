@@ -6,12 +6,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Users, TrendingUp, TrendingDown, Clock, FolderOpen, Upload } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Users, TrendingUp, TrendingDown, Clock, FolderOpen, Upload, CalendarIcon } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
-import { format } from "date-fns";
+import { format, subDays, endOfDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
 import { PageLoadingBar } from "@/components/PageLoadingBar";
+import { uploadToR2 } from "@/utils/uploadToR2";
 
 export default function EmployeeDashboard() {
   const { user } = useAuth();
@@ -20,13 +23,34 @@ export default function EmployeeDashboard() {
 
   const [proofTaskId, setProofTaskId] = useState<string | null>(null);
   const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofUploaded, setProofUploaded] = useState(false);
+  const [proofUploading, setProofUploading] = useState(false);
+  const [proofProgress, setProofProgress] = useState(0);
+  const [proofUrl, setProofUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const resetProofDialog = () => {
+    setProofTaskId(null);
+    setProofFile(null);
+    setProofUploaded(false);
+    setProofUploading(false);
+    setProofProgress(0);
+    setProofUrl(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+  const [fromDate, setFromDate] = useState<Date>(subDays(new Date(), 30));
+  const [toDate, setToDate] = useState<Date>(new Date());
+
   const { data: leads = [], isLoading: leadsLoading } = useQuery({
-    queryKey: ["my-leads", user?.id],
+    queryKey: ["my-leads", user?.id, fromDate, toDate],
     queryFn: async () => {
       if (!user) return [];
-      const { data } = await supabase.from("leads").select("*").eq("assigned_employee_id", user.id);
+      const { data } = await supabase
+        .from("leads")
+        .select("*")
+        .eq("assigned_employee_id", user.id)
+        .gte("created_at", fromDate.toISOString())
+        .lte("created_at", endOfDay(toDate).toISOString());
       return data ?? [];
     },
     enabled: !!user,
@@ -51,32 +75,37 @@ export default function EmployeeDashboard() {
   });
 
   const submitProof = useMutation({
-    mutationFn: async ({ taskId, file }: { taskId: string; file: File }) => {
-      const filePath = `task-proofs/${taskId}/${Date.now()}_${file.name}`;
-      const { error: uploadErr } = await supabase.storage
-        .from("crm-files")
-        .upload(filePath, file, { upsert: true });
-      if (uploadErr) throw uploadErr;
-
-      const { data: { publicUrl } } = supabase.storage.from("crm-files").getPublicUrl(filePath);
-
+    mutationFn: async ({ taskId, leadId }: { taskId: string; leadId: string }) => {
+      if (!proofFile) throw new Error("No file selected");
+      setProofUploading(true);
+      setProofProgress(0);
+      let url: string;
+      try {
+        url = await uploadToR2(proofFile, "task-proofs", setProofProgress);
+        setProofUrl(url);
+        setProofUploaded(true);
+      } finally {
+        setProofUploading(false);
+      }
       const { error } = await supabase.from("tasks").update({
-        proof_url: publicUrl,
+        proof_url: url,
         proof_submitted: true,
         status: "Completed",
         completed_at: new Date().toISOString(),
       }).eq("id", taskId);
       if (error) throw error;
+      await supabase.from("activity_logs").insert({
+        lead_id: leadId, user_id: user!.id, action: "Task proof uploaded", details: url,
+      });
     },
     onSuccess: () => {
       toast({ title: "Proof submitted", description: "Task marked as completed." });
-      setProofTaskId(null);
-      setProofFile(null);
+      resetProofDialog();
       queryClient.invalidateQueries({ queryKey: ["my-tasks", user?.id] });
-      queryClient.invalidateQueries({ queryKey: ["completed-tasks-by-employee"] });
     },
     onError: (err: any) => {
       console.error("Submit proof error:", err);
+      setProofUploading(false);
       toast({ title: "Error submitting proof", description: err.message, variant: "destructive" });
     },
   });
@@ -93,7 +122,46 @@ export default function EmployeeDashboard() {
   return (
     <div className="space-y-6 animate-fade-in">
       <PageLoadingBar loading={leadsLoading} />
-      <h1 className="text-2xl font-bold">My Dashboard</h1>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <h1 className="text-2xl font-bold">My Dashboard</h1>
+        <div className="flex items-center gap-2">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm">
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                From: {format(fromDate, "MMM d, yyyy")}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="single"
+                selected={fromDate}
+                onSelect={(d) => { if (d) setFromDate(d); }}
+                disabled={(d) => d > toDate}
+                className="p-3 pointer-events-auto"
+              />
+            </PopoverContent>
+          </Popover>
+          <span className="text-muted-foreground text-sm">—</span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm">
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                To: {format(toDate, "MMM d, yyyy")}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="end">
+              <Calendar
+                mode="single"
+                selected={toDate}
+                onSelect={(d) => { if (d) setToDate(d); }}
+                disabled={(d) => d < fromDate}
+                className="p-3 pointer-events-auto"
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <Card className="metric-card">
@@ -145,16 +213,14 @@ export default function EmployeeDashboard() {
                   <div
                     key={task.id}
                     className={cn(
-                      "p-4 rounded-lg border hover:shadow-sm transition-shadow",
+                      "p-4 rounded-lg border hover:shadow-sm transition-shadow cursor-pointer",
                       isOverdue && "border-destructive/50 bg-destructive/5",
                       task.status === "Completed" && "bg-success/5 border-success/20"
                     )}
+                    onClick={() => navigate(`/leads/${task.lead_id}`)}
                   >
                     <div className="flex justify-between items-start gap-3">
-                      <div
-                        className="flex-1 min-w-0 cursor-pointer"
-                        onClick={() => navigate(`/leads/${task.lead_id}`)}
-                      >
+                      <div className="flex-1 min-w-0">
                         <p className="font-medium">{leadInfo?.name ?? "Lead"}</p>
                         {(leadInfo?.client_id || leadInfo?.itinerary_code) && (
                           <p className="text-xs text-muted-foreground mt-0.5">
@@ -207,11 +273,8 @@ export default function EmployeeDashboard() {
       </Card>
 
       {/* Submit Proof Dialog */}
-      <Dialog
-        open={!!proofTaskId}
-        onOpenChange={(open) => { if (!open) { setProofTaskId(null); setProofFile(null); } }}
-      >
-        <DialogContent>
+      <Dialog open={!!proofTaskId} onOpenChange={(open) => { if (!open) resetProofDialog(); }}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md overflow-y-auto max-h-[90vh]">
           <DialogHeader>
             <DialogTitle>Submit Task Proof</DialogTitle>
           </DialogHeader>
@@ -226,40 +289,65 @@ export default function EmployeeDashboard() {
                 <p className="text-xs text-muted-foreground">Follow-up: {format(new Date(activeTask.follow_up_date), "MMM d, yyyy")}</p>
               </div>
             )}
-            <p className="text-sm text-muted-foreground">Upload proof of task completion (screenshot, document, photo, etc.)</p>
+
             <div>
-              <Label>Proof File *</Label>
+              <Label className="text-sm font-medium">Proof File *</Label>
+              <p className="text-xs text-muted-foreground mb-2">Screenshot, document, or photo of task completion</p>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*,.pdf,.doc,.docx"
                 className="hidden"
-                onChange={(e) => setProofFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => {
+                  setProofFile(e.target.files?.[0] ?? null);
+                  setProofUploaded(false);
+                  setProofUrl(null);
+                  setProofProgress(0);
+                }}
               />
               {proofFile ? (
-                <div className="flex items-center gap-2 mt-1 p-3 rounded-lg border bg-muted/20">
-                  <span className="text-sm truncate flex-1">{proofFile.name}</span>
-                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setProofFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }}>
-                    Remove
-                  </Button>
+                <div className="rounded-lg border bg-muted/20 overflow-hidden">
+                  <div className="flex items-center gap-2 p-3">
+                    <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="text-sm truncate flex-1 text-foreground">{proofFile.name}</span>
+                    {!proofUploading && !proofUploaded && (
+                      <Button variant="ghost" size="sm" className="h-7 text-xs shrink-0"
+                        onClick={() => { setProofFile(null); setProofUploaded(false); setProofUrl(null); setProofProgress(0); if (fileInputRef.current) fileInputRef.current.value = ""; }}>
+                        Remove
+                      </Button>
+                    )}
+                    {proofUploaded && <span className="text-xs text-success font-medium shrink-0">Uploaded</span>}
+                  </div>
+                  {proofUploading && (
+                    <div className="px-3 pb-3">
+                      <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                        <div className="h-full bg-primary transition-all duration-200 rounded-full" style={{ width: `${proofProgress}%` }} />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">{proofProgress}% uploading...</p>
+                    </div>
+                  )}
                 </div>
               ) : (
-                <Button
-                  variant="outline"
-                  className="w-full mt-1 border-dashed justify-start gap-2"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Upload className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-muted-foreground">Choose File</span>
+                <Button variant="outline" className="w-full border-dashed h-16 flex-col gap-1" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="h-5 w-5 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">Choose File</span>
                 </Button>
               )}
             </div>
+
             <Button
               className="w-full"
               disabled={!proofFile || submitProof.isPending}
-              onClick={() => proofTaskId && proofFile && submitProof.mutate({ taskId: proofTaskId, file: proofFile })}
+              onClick={() => {
+                const task = tasks.find((t) => t.id === proofTaskId);
+                if (proofTaskId && task) {
+                  submitProof.mutate({ taskId: proofTaskId, leadId: task.lead_id });
+                }
+              }}
             >
-              {submitProof.isPending ? "Submitting..." : "Submit Proof & Complete Task"}
+              {submitProof.isPending
+                ? (proofUploading ? `Uploading... ${proofProgress}%` : "Submitting...")
+                : "Submit Proof & Complete Task"}
             </Button>
           </div>
         </DialogContent>

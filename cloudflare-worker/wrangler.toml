@@ -1,0 +1,10 @@
+name = "ah-crm-upload-worker"
+main = "upload-worker.js"
+compatibility_date = "2024-01-01"
+
+[[r2_buckets]]
+binding = "R2_BUCKET"
+bucket_name = "ah-crm"
+
+[vars]
+R2_PUBLIC_DOMAIN = "https://pub-e80a2e1e103a4f2e8c534f99eb473cca.r2.dev"

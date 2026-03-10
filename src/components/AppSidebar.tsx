@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   Menu,
   Activity,
+  CheckSquare,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import {
@@ -41,7 +42,7 @@ const employeeNav = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Leads", url: "/leads", icon: Users },
   { title: "Leads Activity", url: "/leads-activity", icon: Activity },
-  { title: "Contacts", url: "/contacts", icon: Contact },
+  { title: "Tasks", url: "/my-tasks", icon: CheckSquare },
   { title: "Notifications", url: "/notifications", icon: Bell },
 ];
 

@@ -1,9 +1,8 @@
 import { useState, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
 
 interface UploadState {
     file: File | null;
-    progress: number;       // 0-100
+    progress: number;       // 0-100 — real progress from XHR
     uploading: boolean;
     uploaded: boolean;
     publicUrl: string | null;
@@ -19,7 +18,9 @@ const initialState: UploadState = {
     error: null,
 };
 
-export function useFileUpload(bucket: string = "crm-files") {
+const WORKER_URL = import.meta.env.VITE_CLOUDFLARE_WORKER_URL;
+
+export function useFileUpload(_bucket?: string) {
     const [state, setState] = useState<UploadState>(initialState);
 
     const selectFile = useCallback((file: File | null) => {
@@ -31,49 +32,63 @@ export function useFileUpload(bucket: string = "crm-files") {
 
         setState((s) => ({ ...s, uploading: true, progress: 0, error: null }));
 
-        const filePath = `${folder}/${Date.now()}_${state.file.name}`;
-
         try {
-            // Simulate progress for small files (Supabase JS doesn't expose progress)
-            const progressInterval = setInterval(() => {
-                setState((s) => {
-                    if (s.progress < 90) return { ...s, progress: s.progress + 10 };
-                    return s;
-                });
-            }, 200);
+            // Step 1: Get a presigned PUT URL from the Cloudflare Worker
+            const resp = await fetch(`${WORKER_URL}/upload-url`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    filename: state.file.name,
+                    contentType: state.file.type || "application/octet-stream",
+                    folder,
+                }),
+            });
 
-            const { error: uploadErr } = await supabase.storage.from(bucket).upload(filePath, state.file);
-            clearInterval(progressInterval);
-
-            if (uploadErr) {
-                setState((s) => ({ ...s, uploading: false, progress: 0, error: uploadErr.message }));
-                return null;
+            if (!resp.ok) {
+                const err = await resp.json().catch(() => ({ error: "Worker error" }));
+                throw new Error(err.error ?? "Failed to get upload URL");
             }
 
-            const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
+            const { presignedUrl, publicUrl } = await resp.json();
 
-            setState((s) => ({
-                ...s,
-                uploading: false,
-                uploaded: true,
-                progress: 100,
-                publicUrl,
-            }));
+            // Step 2: Upload directly to R2 using XHR for real progress events
+            await new Promise<void>((resolve, reject) => {
+                const xhr = new XMLHttpRequest();
 
+                xhr.upload.addEventListener("progress", (e) => {
+                    if (e.lengthComputable) {
+                        const pct = Math.round((e.loaded / e.total) * 100);
+                        setState((s) => ({ ...s, progress: pct }));
+                    }
+                });
+
+                xhr.addEventListener("load", () => {
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        resolve();
+                    } else {
+                        reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
+                    }
+                });
+
+                xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
+                xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
+
+                xhr.open("PUT", presignedUrl);
+                xhr.setRequestHeader("Content-Type", state.file!.type || "application/octet-stream");
+                xhr.send(state.file);
+            });
+
+            setState((s) => ({ ...s, uploading: false, uploaded: true, progress: 100, publicUrl }));
             return publicUrl;
+
         } catch (err: any) {
             setState((s) => ({ ...s, uploading: false, progress: 0, error: err.message }));
             return null;
         }
-    }, [state.file, bucket]);
+    }, [state.file]);
 
-    const remove = useCallback(() => {
-        setState(initialState);
-    }, []);
-
-    const reset = useCallback(() => {
-        setState(initialState);
-    }, []);
+    const remove = useCallback(() => setState(initialState), []);
+    const reset = useCallback(() => setState(initialState), []);
 
     return { ...state, selectFile, upload, remove, reset };
 }

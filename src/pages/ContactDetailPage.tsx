@@ -118,7 +118,7 @@ export default function ContactDetailPage() {
   if (!contact) return <div className="py-8 text-center text-muted-foreground">Loading...</div>;
 
   return (
-    <div className="space-y-6 animate-fade-in max-w-3xl mx-auto">
+    <div className="space-y-6 animate-fade-in">
       <div className="flex items-center justify-between">
         <Button variant="ghost" onClick={() => navigate("/contacts")}><ArrowLeft className="h-4 w-4 mr-2" /> Back</Button>
         {isAdmin && (
@@ -138,13 +138,10 @@ export default function ContactDetailPage() {
         )}
       </div>
 
-      {/* Header with name & ID */}
+      {/* Header with name */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-3">
-            {contact.name}
-            <span className="text-sm font-medium text-muted-foreground">{contact.contact_id}</span>
-          </CardTitle>
+          <CardTitle>{contact.name}</CardTitle>
         </CardHeader>
       </Card>
 
@@ -164,6 +161,10 @@ export default function ContactDetailPage() {
           </div>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label className="text-muted-foreground text-xs">Contact ID</Label>
+            <p className="mt-1 text-sm font-medium">{contact.contact_id}</p>
+          </div>
           <div>
             <Label className="text-muted-foreground text-xs">Name</Label>
             {isEditingPersonal ? <Input value={personalForm.name} onChange={(e) => setPersonalForm({ ...personalForm, name: e.target.value })} className="h-8 mt-1" /> : <p className="mt-1 text-sm">{contact.name || "—"}</p>}

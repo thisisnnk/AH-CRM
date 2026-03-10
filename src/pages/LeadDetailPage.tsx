@@ -18,6 +18,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { CalendarIcon } from "lucide-react";
 import { sendNotification } from "@/utils/notificationHelper";
+import { uploadToR2 } from "@/utils/uploadToR2";
 
 // ── File Upload Widget ─────────────────────────────────────────
 function FileUploadWidget({
@@ -146,6 +147,14 @@ export default function LeadDetailPage() {
   // Task form state
   const [taskForm, setTaskForm] = useState({ followUpDate: undefined as Date | undefined, notes: "", assignedTo: "" });
 
+  // Task proof upload state
+  const [proofTaskId, setProofTaskId] = useState<string | null>(null);
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofUploading, setProofUploading] = useState(false);
+  const [proofProgress, setProofProgress] = useState(0);
+  const [proofUploaded, setProofUploaded] = useState(false);
+  const [proofUrl, setProofUrl] = useState<string | null>(null);
+
   // Edit mode state
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
   const [isSavingPersonal, setIsSavingPersonal] = useState(false);
@@ -154,50 +163,9 @@ export default function LeadDetailPage() {
   const [isSavingLeadInfo, setIsSavingLeadInfo] = useState(false);
   const [leadInfoForm, setLeadInfoForm] = useState({ lead_source: "", status: "", itinerary_code: "", destination: "", travelers: "", trip_duration: "", tour_category: "" });
 
-  // ── Upload helper with real progress ──
-  const uploadFile = async (file: File, folder: string, setProgress: (n: number) => void): Promise<string> => {
-    const filePath = `${folder}/${id}/${Date.now()}_${file.name}`;
-    const bucket = "crm-files";
-
-    // Get session token for auth header
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const supabaseUrl = (supabase as any).supabaseUrl ?? import.meta.env.VITE_SUPABASE_URL;
-
-    return new Promise<string>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      const url = `${supabaseUrl}/storage/v1/object/${bucket}/${filePath}`;
-
-      // Track real upload progress
-      xhr.upload.addEventListener("progress", (e) => {
-        if (e.lengthComputable) {
-          const pct = Math.round((e.loaded / e.total) * 100);
-          setProgress(pct);
-        }
-      });
-
-      xhr.addEventListener("load", () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          setProgress(100);
-          const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(filePath);
-          resolve(publicUrl);
-        } else {
-          let msg = "Upload failed";
-          try { msg = JSON.parse(xhr.responseText)?.message ?? msg; } catch { }
-          reject(new Error(`${msg} (HTTP ${xhr.status})`));
-        }
-      });
-
-      xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
-      xhr.addEventListener("timeout", () => reject(new Error("Upload timed out — please try again")));
-
-      xhr.open("POST", url);
-      xhr.timeout = 60000; // 60 second timeout
-      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-      xhr.setRequestHeader("x-upsert", "true");
-      xhr.send(file);
-    });
-  };
+  // ── Upload helper — sends to Cloudflare R2 ──
+  const uploadFile = (file: File, folder: string, setProgress: (n: number) => void): Promise<string> =>
+    uploadToR2(file, folder, setProgress);
 
   // ── Queries ──
   const { data: lead } = useQuery({
@@ -320,7 +288,7 @@ export default function LeadDetailPage() {
 
       await supabase.from("activity_logs").insert({
         lead_id: id!, user_id: user.id, action: "Submitted itinerary",
-        details: `File: ${itineraryFile?.name ?? itineraryUrl}`,
+        details: itineraryUrl ?? itineraryFile?.name ?? "",
       });
     },
     onSuccess: () => {
@@ -346,10 +314,10 @@ export default function LeadDetailPage() {
 
       const { error: revErr } = await supabase.from("revisions").insert({
         revision_number: nextNum,
-        call_recording_url: revForm.type === "Call Recording" ? fileUrl : null,
-        itinerary_link: revForm.type === "Revised Itinerary" ? revForm.itineraryLink : (revForm.type === "Chat Screenshot" ? fileUrl : null),
+        call_recording_url: revForm.type === "Call Recording" ? (fileUrl ?? "") : "",
+        itinerary_link: (revForm.type === "Revised Itinerary" || revForm.type === "Chat Screenshot") ? (fileUrl ?? "") : "",
         notes: `[${revForm.type}] ${revForm.notes}`,
-        send_status: revForm.type === "Revised Itinerary" ? "Sent" : "Pending",
+        send_status: revForm.type === "Revised Itinerary" ? "Sent" : "Submitted",
         date_sent: revForm.type === "Revised Itinerary" ? new Date().toISOString() : null,
         lead_id: id!,
         created_by: user.id,
@@ -360,7 +328,7 @@ export default function LeadDetailPage() {
 
       const details = revForm.type === "Chat Screenshot" ? "Screenshot uploaded"
         : revForm.type === "Call Recording" ? "Call recording uploaded"
-          : `Revised itinerary: ${revForm.itineraryLink}`;
+          : `Revised itinerary uploaded`;
 
       await supabase.from("activity_logs").insert({
         lead_id: id!, user_id: user.id,
@@ -369,7 +337,7 @@ export default function LeadDetailPage() {
       });
     },
     onSuccess: () => {
-      toast({ title: "Revision added" });
+      toast({ title: "Revision submitted successfully", description: `${revForm.type} has been recorded.` });
       setRevForm({ type: "", notes: "", itineraryLink: "" });
       setRevFile(null); setRevUploaded(false); setRevFileUrl(null); setRevProgress(0);
       queryClient.invalidateQueries({ queryKey: ["revisions", id] });
@@ -416,6 +384,35 @@ export default function LeadDetailPage() {
     onError: (err: any) => {
       console.error("Create task error:", err);
       toast({ title: "Error creating task", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // Task Proof Submit
+  const submitTaskProof = useMutation({
+    mutationFn: async () => {
+      if (!proofFile || !proofTaskId || !user) throw new Error("No file selected");
+      const url = await uploadToR2(proofFile, "task-proofs", setProofProgress);
+      const { error } = await supabase.from("tasks").update({
+        proof_url: url,
+        proof_submitted: true,
+        status: "Completed",
+        completed_at: new Date().toISOString(),
+      }).eq("id", proofTaskId);
+      if (error) throw error;
+      await supabase.from("activity_logs").insert({
+        lead_id: id!, user_id: user.id, action: "Task proof uploaded",
+        details: url,
+      });
+    },
+    onSuccess: () => {
+      toast({ title: "Proof submitted", description: "Task marked as completed." });
+      setProofTaskId(null); setProofFile(null); setProofUploaded(false); setProofUrl(null); setProofProgress(0);
+      queryClient.invalidateQueries({ queryKey: ["lead-tasks", id] });
+      queryClient.invalidateQueries({ queryKey: ["activities", id] });
+    },
+    onError: (err: any) => {
+      console.error("Submit task proof error:", err);
+      toast({ title: "Error submitting proof", description: err.message, variant: "destructive" });
     },
   });
 
@@ -482,7 +479,7 @@ export default function LeadDetailPage() {
 
   const handleRevFileUpload = async () => {
     if (!revFile) return;
-    const folder = revForm.type === "Call Recording" ? "recordings" : "revisions";
+    const folder = revForm.type === "Call Recording" ? "recordings" : revForm.type === "Revised Itinerary" ? "itineraries" : "revisions";
     setRevUploading(true);
     setRevProgress(0);
     try {
@@ -501,10 +498,7 @@ export default function LeadDetailPage() {
     "Revised Itinerary": <RefreshCw className="h-4 w-4" />,
   };
 
-  const canSubmitRevision = revForm.type && revForm.notes.trim() &&
-    ((revForm.type === "Chat Screenshot" && revUploaded) ||
-      (revForm.type === "Call Recording" && revUploaded) ||
-      (revForm.type === "Revised Itinerary" && revForm.itineraryLink.trim()));
+  const canSubmitRevision = revForm.type && revForm.notes.trim() && revUploaded;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -735,7 +729,10 @@ export default function LeadDetailPage() {
                     )}
                   </div>
                   <div className="text-right">
-                    <span className={cn("text-xs px-2 py-0.5 rounded-full", rev.send_status === "Sent" ? "bg-success/10 text-success" : "bg-warning/10 text-warning")}>
+                    <span className={cn("text-xs px-2 py-0.5 rounded-full",
+                      rev.send_status === "Sent" ? "bg-success/10 text-success" :
+                      rev.send_status === "Submitted" ? "bg-info/10 text-info" :
+                      "bg-warning/10 text-warning")}>
                       {rev.send_status}
                     </span>
                     <p className="text-xs text-muted-foreground mt-1">{format(new Date(rev.created_at!), "MMM d, yyyy")}</p>
@@ -763,11 +760,11 @@ export default function LeadDetailPage() {
               </Select>
             </div>
 
-            {(revForm.type === "Chat Screenshot" || revForm.type === "Call Recording") && (
+            {(revForm.type === "Chat Screenshot" || revForm.type === "Call Recording" || revForm.type === "Revised Itinerary") && (
               <>
                 <FileUploadWidget
-                  accept={revForm.type === "Chat Screenshot" ? "image/*" : "audio/*,video/*"}
-                  label={revForm.type === "Chat Screenshot" ? "Screenshot File *" : "Recording File *"}
+                  accept={revForm.type === "Chat Screenshot" ? "image/*" : revForm.type === "Call Recording" ? "audio/*,video/*" : ".pdf,.doc,.docx,image/*"}
+                  label={revForm.type === "Chat Screenshot" ? "Screenshot File *" : revForm.type === "Call Recording" ? "Recording File *" : "Itinerary File *"}
                   file={revFile}
                   onSelect={(f) => { setRevFile(f); setRevUploaded(false); setRevFileUrl(null); setRevProgress(0); }}
                   onRemove={() => { setRevFile(null); setRevUploaded(false); setRevFileUrl(null); setRevProgress(0); }}
@@ -783,12 +780,6 @@ export default function LeadDetailPage() {
               </>
             )}
 
-            {revForm.type === "Revised Itinerary" && (
-              <div>
-                <Label>Revised Itinerary Link *</Label>
-                <Input value={revForm.itineraryLink} onChange={(e) => setRevForm({ ...revForm, itineraryLink: e.target.value })} placeholder="https://..." />
-              </div>
-            )}
 
             {revForm.type && (
               <div><Label>Notes *</Label><Textarea value={revForm.notes} onChange={(e) => setRevForm({ ...revForm, notes: e.target.value })} placeholder="Describe the revision..." /></div>
@@ -819,8 +810,45 @@ export default function LeadDetailPage() {
                   {t.proof_url && (
                     <a href={t.proof_url} target="_blank" rel="noopener" className="text-xs text-primary hover:underline whitespace-nowrap">View Proof</a>
                   )}
+                  {!t.proof_submitted && t.status !== "Completed" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        setProofTaskId(proofTaskId === t.id ? null : t.id);
+                        setProofFile(null); setProofUploaded(false); setProofUrl(null); setProofProgress(0);
+                      }}
+                    >
+                      <Upload className="h-3 w-3 mr-1" />
+                      {proofTaskId === t.id ? "Cancel" : "Upload Proof"}
+                    </Button>
+                  )}
                 </div>
               </div>
+
+              {/* Inline proof upload panel */}
+              {proofTaskId === t.id && (
+                <div className="mt-3 pt-3 border-t space-y-3">
+                  <FileUploadWidget
+                    accept="image/*,.pdf,.doc,.docx"
+                    label="Proof File *"
+                    file={proofFile}
+                    onSelect={(f) => { setProofFile(f); setProofUploaded(false); setProofUrl(null); setProofProgress(0); }}
+                    onRemove={() => { setProofFile(null); setProofUploaded(false); setProofUrl(null); setProofProgress(0); }}
+                    uploading={proofUploading}
+                    progress={proofProgress}
+                    uploaded={proofUploaded}
+                  />
+                  <Button
+                    size="sm"
+                    onClick={() => submitTaskProof.mutate()}
+                    disabled={!proofFile || submitTaskProof.isPending}
+                  >
+                    {submitTaskProof.isPending ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Submitting...</> : "Submit Proof"}
+                  </Button>
+                </div>
+              )}
             </div>
           ))}
           <Separator />
@@ -881,6 +909,7 @@ export default function LeadDetailPage() {
             const relevantActivities = activities.filter((a) =>
               a.action === "Submitted itinerary" ||
               a.action === "Created task" ||
+              a.action === "Task proof uploaded" ||
               (a.action ?? "").startsWith("Added Revision") ||
               (a.action ?? "").startsWith("Changed status to")
             );
@@ -888,16 +917,24 @@ export default function LeadDetailPage() {
             <p className="text-sm text-muted-foreground">No activity recorded yet</p>
           ) : (
             <div className="space-y-2">
-              {relevantActivities.map((a) => (
+              {relevantActivities.map((a) => {
+                const isProofUrl = a.details?.startsWith("https://");
+                return (
                 <div key={a.id} className="flex items-start gap-3 text-sm py-2 border-b last:border-0">
                   <div className="w-2 h-2 rounded-full bg-primary mt-2 shrink-0" />
                   <div>
                     <p className="font-medium">{a.action}</p>
-                    {a.details && <p className="text-xs text-muted-foreground">{a.details}</p>}
+                    {a.details && !isProofUrl && <p className="text-xs text-muted-foreground">{a.details}</p>}
+                    {isProofUrl && (
+                      <a href={a.details} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline">
+                        View Proof
+                      </a>
+                    )}
                     <p className="text-xs text-muted-foreground">{format(new Date(a.timestamp!), "MMM d, yyyy HH:mm")}</p>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           );
           })()}

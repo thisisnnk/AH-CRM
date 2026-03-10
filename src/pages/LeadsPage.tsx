@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,7 +50,7 @@ export default function LeadsPage() {
   const [waNumber, setWaNumber] = useState("");
 
   const { data: leads = [], isLoading: leadsLoading } = useQuery({
-    queryKey: ["leads", fromDate, toDate, user?.id, role],
+    queryKey: ["leads", fromDate, toDate, user?.id, role, search],
     queryFn: async () => {
       let query = supabase
         .from("leads")
@@ -63,6 +63,11 @@ export default function LeadsPage() {
         query = query.eq("assigned_employee_id", user.id);
       }
 
+      if (search.trim()) {
+        const s = search.trim();
+        query = query.or(`name.ilike.%${s}%,phone.ilike.%${s}%,destination.ilike.%${s}%`);
+      }
+
       const { data, error } = await query;
       if (error) {
         console.error("Leads fetch error:", error);
@@ -72,7 +77,8 @@ export default function LeadsPage() {
       return data ?? [];
     },
     enabled: !!user,
-    staleTime: 60_000,
+    staleTime: 2 * 60_000,
+    placeholderData: keepPreviousData,
     retry: 2,
   });
 
@@ -270,10 +276,6 @@ export default function LeadsPage() {
     if (filterSources.length > 0 && !filterSources.includes(l.lead_source ?? "")) return false;
     if (filterAssignedTos.length > 0 && !filterAssignedTos.includes(l.assigned_employee_id ?? "")) return false;
     if (filterStatuses.length > 0 && !filterStatuses.includes((isAdmin ? l.status : l.badge_stage) ?? "")) return false;
-    if (search) {
-      const s = search.toLowerCase();
-      return l.name.toLowerCase().includes(s) || l.phone.includes(s) || l.destination?.toLowerCase().includes(s);
-    }
     return true;
   });
 

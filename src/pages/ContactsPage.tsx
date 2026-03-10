@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,23 +30,35 @@ export default function ContactsPage() {
   const [waDialCode, setWaDialCode] = useState("+91");
   const [waNumber, setWaNumber] = useState("");
 
-  const { data: contacts = [], isLoading: contactsLoading } = useQuery({
-    queryKey: ["contacts"],
+  const { data: contactsData, isLoading: contactsLoading } = useQuery({
+    queryKey: ["contacts", page, search],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("contacts")
-        .select("id,contact_id,name,phone,email,city,created_at")
-        .order("created_at", { ascending: false });
+        .select("id,contact_id,name,phone,email,city,created_at", { count: "exact" })
+        .order("created_at", { ascending: false })
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+
+      if (search.trim()) {
+        const s = search.trim();
+        query = query.or(`name.ilike.%${s}%,phone.ilike.%${s}%,contact_id.ilike.%${s}%`);
+      }
+
+      const { data, error, count } = await query;
       if (error) {
         console.error("Contacts fetch error:", error);
         toast({ title: "Error loading contacts", description: error.message, variant: "destructive" });
-        return [];
+        return { contacts: [], total: 0 };
       }
-      return data ?? [];
+      return { contacts: data ?? [], total: count ?? 0 };
     },
-    staleTime: 60_000,
+    staleTime: 2 * 60_000,
+    placeholderData: keepPreviousData,
     retry: 2,
   });
+
+  const contacts = contactsData?.contacts ?? [];
+  const totalCount = contactsData?.total ?? 0;
 
   const fullPhone = phoneDialCode + phoneNumber;
   const fullWa = waNumber ? waDialCode + waNumber : "";
@@ -83,17 +95,10 @@ export default function ContactsPage() {
 
 
 
-  const filtered = contacts.filter((c) => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return c.name.toLowerCase().includes(s) || c.phone.includes(s) || c.contact_id.toLowerCase().includes(s);
-  });
-
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
   const handleExport = () => {
-    const rows = filtered.map((c) => ({
+    const rows = contacts.map((c) => ({
       "Contact ID": c.contact_id,
       "Name": c.name,
       "Phone": c.phone,
@@ -112,7 +117,7 @@ export default function ContactsPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Contacts</h1>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleExport} disabled={filtered.length === 0}>
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={contacts.length === 0}>
             <Download className="h-4 w-4 mr-1" /> Export
           </Button>
           {isAdmin && (
@@ -162,30 +167,25 @@ export default function ContactsPage() {
               <th className="text-left py-3 px-4">Contact ID</th>
               <th className="text-left py-3 px-4">Name</th>
               <th className="text-left py-3 px-4">Phone</th>
-              <th className="text-left py-3 px-4">Email</th>
-              <th className="text-left py-3 px-4">City</th>
-
             </tr>
           </thead>
           <tbody>
-            {paginated.map((c) => (
+            {contacts.map((c) => (
               <tr key={c.id} className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => navigate(`/contacts/${c.id}`)}>
                 <td className="py-3 px-4 font-medium">{c.contact_id}</td>
                 <td className="py-3 px-4 font-medium">{c.name}</td>
                 <td className="py-3 px-4">{c.phone}</td>
-                <td className="py-3 px-4">{c.email ?? "—"}</td>
-                <td className="py-3 px-4">{c.city ?? "—"}</td>
               </tr>
             ))}
             {contactsLoading && Array.from({ length: 8 }).map((_, i) => (
               <tr key={`skel-${i}`} className="border-b">
-                {Array.from({ length: 5 }).map((_, j) => (
+                {Array.from({ length: 3 }).map((_, j) => (
                   <td key={j} className="py-3 px-4"><Skeleton className="h-4 w-full" /></td>
                 ))}
               </tr>
             ))}
-            {!contactsLoading && filtered.length === 0 && (
-              <tr><td colSpan={5} className="py-8 text-center text-muted-foreground">No contacts found</td></tr>
+            {!contactsLoading && totalCount === 0 && (
+              <tr><td colSpan={3} className="py-8 text-center text-muted-foreground">No contacts found</td></tr>
             )}
           </tbody>
         </table>
@@ -194,7 +194,7 @@ export default function ContactsPage() {
       {/* Pagination controls */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between text-sm text-muted-foreground pt-1">
-          <span>{filtered.length} contacts · page {page + 1} of {totalPages}</span>
+          <span>{totalCount} contacts · page {page + 1} of {totalPages}</span>
           <div className="flex gap-2">
             <button
               className="px-3 py-1 rounded border disabled:opacity-40 hover:bg-muted"

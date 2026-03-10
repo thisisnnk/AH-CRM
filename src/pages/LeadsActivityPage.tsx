@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useNavigate } from "react-router-dom";
@@ -8,16 +9,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Filter, Search, CalendarIcon, Clock } from "lucide-react";
+import { Filter, Search, CalendarIcon, Clock, ExternalLink } from "lucide-react";
 import { PageLoadingBar } from "@/components/PageLoadingBar";
 
 const isRelevantAction = (action: string) =>
   action === "Submitted itinerary" ||
   action === "Created task" ||
+  action === "Task proof uploaded" ||
   action.startsWith("Added Revision") ||
   action.startsWith("Changed status to");
 
 export default function LeadsActivityPage() {
+  const { role, user } = useAuth();
+  const isAdmin = role === "admin";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const now = new Date();
@@ -50,32 +54,108 @@ export default function LeadsActivityPage() {
   const { data: rawActivities = [], isLoading: activitiesLoading } = useQuery({
     queryKey: ["all-activity-logs"],
     queryFn: async () => {
-      const { data: logs } = await supabase
+      let logsQuery = supabase
         .from("activity_logs")
         .select("*")
         .order("timestamp", { ascending: false });
+      if (!isAdmin && user) logsQuery = logsQuery.eq("user_id", user.id);
+      const { data: logs } = await logsQuery;
       if (!logs) return [];
 
       const leadIds = [...new Set(logs.map((l) => l.lead_id).filter(Boolean))];
       if (leadIds.length === 0) return [];
 
-      const { data: leads } = await supabase
-        .from("leads")
-        .select("id, name, client_id, assigned_employee_id")
-        .in("id", leadIds);
+      const [{ data: leads }, { data: tasksWithProofs }, { data: revisions }] = await Promise.all([
+        supabase
+          .from("leads")
+          .select("id, name, client_id, assigned_employee_id")
+          .in("id", leadIds),
+        supabase
+          .from("tasks")
+          .select("lead_id, assigned_employee_id, proof_url, completed_at")
+          .in("lead_id", leadIds)
+          .not("proof_url", "is", null),
+        supabase
+          .from("revisions")
+          .select("lead_id, created_by, itinerary_link, call_recording_url, date_sent, created_at")
+          .in("lead_id", leadIds),
+      ]);
 
       const leadMap = Object.fromEntries((leads ?? []).map((l) => [l.id, l]));
+      const proofTasks = tasksWithProofs ?? [];
+      const revisionList = revisions ?? [];
 
       return logs
         .filter((a) => isRelevantAction(a.action ?? ""))
         .map((a) => {
           const lead = leadMap[a.lead_id];
+
+          let proofUrl: string | null = null;
+
+          if (a.action === "Task proof uploaded") {
+            if (a.details?.startsWith("https://")) {
+              proofUrl = a.details;
+            } else {
+              const candidates = proofTasks.filter(
+                (t) => t.lead_id === a.lead_id && t.assigned_employee_id === a.user_id
+              );
+              if (candidates.length === 1) {
+                proofUrl = candidates[0].proof_url;
+              } else if (candidates.length > 1 && a.timestamp) {
+                const actTs = new Date(a.timestamp).getTime();
+                const closest = candidates.reduce((best, t) => {
+                  const tDiff = Math.abs(new Date(t.completed_at ?? 0).getTime() - actTs);
+                  const bDiff = Math.abs(new Date(best.completed_at ?? 0).getTime() - actTs);
+                  return tDiff < bDiff ? t : best;
+                });
+                proofUrl = closest.proof_url;
+              }
+            }
+          } else if (a.action === "Submitted itinerary") {
+            if (a.details?.startsWith("https://")) {
+              proofUrl = a.details;
+            } else {
+              const candidates = revisionList.filter(
+                (r) => r.lead_id === a.lead_id && r.created_by === a.user_id && r.itinerary_link
+              );
+              if (candidates.length === 1) {
+                proofUrl = candidates[0].itinerary_link;
+              } else if (candidates.length > 1 && a.timestamp) {
+                const actTs = new Date(a.timestamp).getTime();
+                const closest = candidates.reduce((best, r) => {
+                  const rDiff = Math.abs(new Date(r.date_sent ?? 0).getTime() - actTs);
+                  const bDiff = Math.abs(new Date(best.date_sent ?? 0).getTime() - actTs);
+                  return rDiff < bDiff ? r : best;
+                });
+                proofUrl = closest.itinerary_link;
+              }
+            }
+          } else if ((a.action ?? "").startsWith("Added Revision")) {
+            const actTs = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const candidates = revisionList.filter(
+              (r) => r.lead_id === a.lead_id && r.created_by === a.user_id &&
+                ((r.itinerary_link && r.itinerary_link.startsWith("https://")) ||
+                 (r.call_recording_url && r.call_recording_url.startsWith("https://")))
+            );
+            if (candidates.length === 1) {
+              proofUrl = candidates[0].itinerary_link || candidates[0].call_recording_url || null;
+            } else if (candidates.length > 1 && actTs) {
+              const closest = candidates.reduce((best, r) => {
+                const rDiff = Math.abs(new Date((r as any).created_at ?? r.date_sent ?? 0).getTime() - actTs);
+                const bDiff = Math.abs(new Date((best as any).created_at ?? best.date_sent ?? 0).getTime() - actTs);
+                return rDiff < bDiff ? r : best;
+              });
+              proofUrl = closest.itinerary_link || closest.call_recording_url || null;
+            }
+          }
+
           return {
             ...a,
             leadName: lead?.name ?? "—",
             clientId: lead?.client_id ?? "—",
             assignedEmployeeId: lead?.assigned_employee_id ?? null,
             performedById: a.user_id ?? null,
+            proofUrl,
           };
         });
     },
@@ -194,7 +274,7 @@ export default function LeadsActivityPage() {
       <h1 className="text-2xl font-bold">Leads Activity</h1>
 
       <Tabs defaultValue="activity">
-        {/* Centered tab list with underline-style active indicator */}
+        {/* Centered tab list — Inactivity Tracker only visible to admins */}
         <div className="flex justify-center border-b mb-4">
           <TabsList className="bg-transparent rounded-none gap-0 p-0 h-auto">
             <TabsTrigger
@@ -203,12 +283,14 @@ export default function LeadsActivityPage() {
             >
               Activity Tracker
             </TabsTrigger>
-            <TabsTrigger
-              value="inactivity"
-              className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-6 pb-2 pt-1 text-sm font-medium text-muted-foreground data-[state=active]:text-foreground"
-            >
-              Inactivity Tracker
-            </TabsTrigger>
+            {isAdmin && (
+              <TabsTrigger
+                value="inactivity"
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-6 pb-2 pt-1 text-sm font-medium text-muted-foreground data-[state=active]:text-foreground"
+              >
+                Inactivity Tracker
+              </TabsTrigger>
+            )}
           </TabsList>
         </div>
 
@@ -334,59 +416,62 @@ export default function LeadsActivityPage() {
 
                   <th className="text-left py-3 px-4 whitespace-nowrap">Activity</th>
                   <th className="text-left py-3 px-4 whitespace-nowrap">Lead Name</th>
-                  <th className="text-left py-3 px-4 whitespace-nowrap">Client ID</th>
-                  <th className="text-left py-3 px-4 whitespace-nowrap">Assigned To</th>
+                  {isAdmin && <th className="text-left py-3 px-4 whitespace-nowrap">Client ID</th>}
+                  {isAdmin && <th className="text-left py-3 px-4 whitespace-nowrap">Assigned To</th>}
 
-                  {/* Performed By with employee filter */}
-                  <th className="text-left py-3 px-4 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1">
-                      Performed By
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <button
-                            className={cn(
-                              "inline-flex items-center justify-center rounded p-0.5 hover:bg-black/10",
-                              filterAssignees.length > 0 ? "text-primary" : "text-muted-foreground"
-                            )}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <Filter className="h-3.5 w-3.5" />
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-56 p-2" align="start" onClick={(e) => e.stopPropagation()}>
-                          <p className="text-xs font-semibold text-muted-foreground mb-2 px-1">Filter by Employee</p>
-                          <div className="space-y-0.5 max-h-48 overflow-y-auto">
-                            {employees.map((emp) => (
-                              <label key={emp.user_id} className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted cursor-pointer text-sm font-normal">
-                                <Checkbox
-                                  checked={filterAssignees.includes(emp.user_id)}
-                                  onCheckedChange={(checked) =>
-                                    setFilterAssignees(checked
-                                      ? [...filterAssignees, emp.user_id]
-                                      : filterAssignees.filter((v) => v !== emp.user_id)
-                                    )
-                                  }
-                                />
-                                <span className="flex-1">{emp.name}</span>
-                              </label>
-                            ))}
-                          </div>
-                          {filterAssignees.length > 0 && (
-                            <button onClick={() => setFilterAssignees([])} className="mt-2 w-full text-center text-xs text-muted-foreground hover:text-foreground py-1 border-t">
-                              Clear
+                  {/* Performed By with employee filter — admin only */}
+                  {isAdmin && (
+                    <th className="text-left py-3 px-4 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1">
+                        Performed By
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <button
+                              className={cn(
+                                "inline-flex items-center justify-center rounded p-0.5 hover:bg-black/10",
+                                filterAssignees.length > 0 ? "text-primary" : "text-muted-foreground"
+                              )}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Filter className="h-3.5 w-3.5" />
                             </button>
-                          )}
-                        </PopoverContent>
-                      </Popover>
-                    </span>
-                  </th>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-56 p-2" align="start" onClick={(e) => e.stopPropagation()}>
+                            <p className="text-xs font-semibold text-muted-foreground mb-2 px-1">Filter by Employee</p>
+                            <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                              {employees.map((emp) => (
+                                <label key={emp.user_id} className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-muted cursor-pointer text-sm font-normal">
+                                  <Checkbox
+                                    checked={filterAssignees.includes(emp.user_id)}
+                                    onCheckedChange={(checked) =>
+                                      setFilterAssignees(checked
+                                        ? [...filterAssignees, emp.user_id]
+                                        : filterAssignees.filter((v) => v !== emp.user_id)
+                                      )
+                                    }
+                                  />
+                                  <span className="flex-1">{emp.name}</span>
+                                </label>
+                              ))}
+                            </div>
+                            {filterAssignees.length > 0 && (
+                              <button onClick={() => setFilterAssignees([])} className="mt-2 w-full text-center text-xs text-muted-foreground hover:text-foreground py-1 border-t">
+                                Clear
+                              </button>
+                            )}
+                          </PopoverContent>
+                        </Popover>
+                      </span>
+                    </th>
+                  )}
+                  <th className="text-left py-3 px-4 whitespace-nowrap">Proof</th>
                 </tr>
               </thead>
               <tbody>
                 {activitiesLoading ? (
-                  <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">Loading...</td></tr>
+                  <tr><td colSpan={isAdmin ? 8 : 5} className="py-8 text-center text-muted-foreground">Loading...</td></tr>
                 ) : filteredActivities.length === 0 ? (
-                  <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">No activities found</td></tr>
+                  <tr><td colSpan={isAdmin ? 8 : 5} className="py-8 text-center text-muted-foreground">No activities found</td></tr>
                 ) : (
                   filteredActivities.map((a) => (
                     <tr
@@ -402,9 +487,21 @@ export default function LeadsActivityPage() {
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap font-medium">{a.action}</td>
                       <td className="py-3 px-4 whitespace-nowrap">{a.leadName}</td>
-                      <td className="py-3 px-4 whitespace-nowrap text-muted-foreground">{a.clientId}</td>
-                      <td className="py-3 px-4 whitespace-nowrap text-muted-foreground">{a.assignedTo}</td>
-                      <td className="py-3 px-4 whitespace-nowrap font-medium">{a.performedBy}</td>
+                      {isAdmin && <td className="py-3 px-4 whitespace-nowrap text-muted-foreground">{a.clientId}</td>}
+                      {isAdmin && <td className="py-3 px-4 whitespace-nowrap text-muted-foreground">{a.assignedTo}</td>}
+                      {isAdmin && <td className="py-3 px-4 whitespace-nowrap font-medium">{a.performedBy}</td>}
+                      <td className="py-3 px-4 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        {a.proofUrl ? (
+                          <a
+                            href={a.proofUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-primary text-xs font-medium hover:underline"
+                          >
+                            View Proof <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : "—"}
+                      </td>
                     </tr>
                   ))
                 )}

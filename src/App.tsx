@@ -15,6 +15,7 @@ import ConsolePage from "./pages/ConsolePage";
 import NotificationsPage from "./pages/NotificationsPage";
 import NotFound from "./pages/NotFound";
 import LeadsActivityPage from "./pages/LeadsActivityPage";
+import EmployeeTasksPage from "./pages/EmployeeTasksPage";
 import { ProtectedLayout, AdminRoute } from "./components/ProtectedLayout";
 
 const queryClient = new QueryClient({
@@ -60,6 +61,7 @@ const App = () => (
               <Route path="/contacts" element={<ContactsPage />} />
               <Route path="/contacts/:id" element={<ContactDetailPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
+              <Route path="/my-tasks" element={<EmployeeTasksPage />} />
 
               {/* Admin only */}
               <Route element={<AdminRoute />}>
