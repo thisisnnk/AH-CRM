@@ -124,7 +124,7 @@ export default function EmployeeDashboard() {
       <PageLoadingBar loading={leadsLoading} />
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">My Dashboard</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm">
@@ -163,35 +163,35 @@ export default function EmployeeDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 md:gap-4">
         <Card className="metric-card">
-          <CardContent className="p-6 flex items-center gap-4">
-            <div className="rounded-xl p-3 bg-info/10 text-info"><Users className="h-6 w-6" /></div>
-            <div><p className="text-sm text-muted-foreground">Total</p><p className="text-2xl font-bold">{total}</p></div>
+          <CardContent className="p-4 md:p-6 flex items-center gap-3 md:gap-4">
+            <div className="rounded-xl p-2 md:p-3 bg-info/10 text-info shrink-0"><Users className="h-5 w-5 md:h-6 md:w-6" /></div>
+            <div><p className="text-xs md:text-sm text-muted-foreground">Total</p><p className="text-xl md:text-2xl font-bold">{total}</p></div>
           </CardContent>
         </Card>
         <Card className="metric-card">
-          <CardContent className="p-6 flex items-center gap-4">
-            <div className="rounded-xl p-3 bg-success/10 text-success"><TrendingUp className="h-6 w-6" /></div>
-            <div><p className="text-sm text-muted-foreground">Converted</p><p className="text-2xl font-bold">{converted}</p></div>
+          <CardContent className="p-4 md:p-6 flex items-center gap-3 md:gap-4">
+            <div className="rounded-xl p-2 md:p-3 bg-success/10 text-success shrink-0"><TrendingUp className="h-5 w-5 md:h-6 md:w-6" /></div>
+            <div><p className="text-xs md:text-sm text-muted-foreground">Converted</p><p className="text-xl md:text-2xl font-bold">{converted}</p></div>
           </CardContent>
         </Card>
         <Card className="metric-card">
-          <CardContent className="p-6 flex items-center gap-4">
-            <div className="rounded-xl p-3 bg-destructive/10 text-destructive"><TrendingDown className="h-6 w-6" /></div>
-            <div><p className="text-sm text-muted-foreground">Lost</p><p className="text-2xl font-bold">{lost}</p></div>
+          <CardContent className="p-4 md:p-6 flex items-center gap-3 md:gap-4">
+            <div className="rounded-xl p-2 md:p-3 bg-destructive/10 text-destructive shrink-0"><TrendingDown className="h-5 w-5 md:h-6 md:w-6" /></div>
+            <div><p className="text-xs md:text-sm text-muted-foreground">Lost</p><p className="text-xl md:text-2xl font-bold">{lost}</p></div>
           </CardContent>
         </Card>
         <Card className="metric-card">
-          <CardContent className="p-6 flex items-center gap-4">
-            <div className="rounded-xl p-3 bg-warning/10 text-warning"><Clock className="h-6 w-6" /></div>
-            <div><p className="text-sm text-muted-foreground">On Progress</p><p className="text-2xl font-bold">{onProgress}</p></div>
+          <CardContent className="p-4 md:p-6 flex items-center gap-3 md:gap-4">
+            <div className="rounded-xl p-2 md:p-3 bg-warning/10 text-warning shrink-0"><Clock className="h-5 w-5 md:h-6 md:w-6" /></div>
+            <div><p className="text-xs md:text-sm text-muted-foreground">On Progress</p><p className="text-xl md:text-2xl font-bold">{onProgress}</p></div>
           </CardContent>
         </Card>
-        <Card className="metric-card">
-          <CardContent className="p-6 flex items-center gap-4">
-            <div className="rounded-xl p-3 bg-primary/10 text-foreground"><FolderOpen className="h-6 w-6" /></div>
-            <div><p className="text-sm text-muted-foreground">Open</p><p className="text-2xl font-bold">{open}</p></div>
+        <Card className="metric-card col-span-2 sm:col-span-1">
+          <CardContent className="p-4 md:p-6 flex items-center gap-3 md:gap-4">
+            <div className="rounded-xl p-2 md:p-3 bg-primary/10 text-foreground shrink-0"><FolderOpen className="h-5 w-5 md:h-6 md:w-6" /></div>
+            <div><p className="text-xs md:text-sm text-muted-foreground">Open</p><p className="text-xl md:text-2xl font-bold">{open}</p></div>
           </CardContent>
         </Card>
       </div>

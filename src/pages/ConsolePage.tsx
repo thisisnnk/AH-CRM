@@ -142,7 +142,7 @@ export default function ConsolePage() {
     <div className="space-y-6 animate-fade-in">
       <PageLoadingBar loading={employeesLoading} />
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Console</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
@@ -157,7 +157,7 @@ export default function ConsolePage() {
               <Plus className="h-4 w-4 mr-2" /> Create Employee
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
             <DialogHeader>
               <DialogTitle>Create New Employee</DialogTitle>
             </DialogHeader>

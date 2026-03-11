@@ -307,7 +307,7 @@ export default function AdminDashboard() {
         <h1 className="text-2xl font-bold">Dashboard</h1>
 
         {/* Separate From / To date pickers + Export */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Popover>
             <PopoverTrigger asChild>
               <Button variant="outline" size="sm">

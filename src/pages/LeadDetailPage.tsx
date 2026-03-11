@@ -538,7 +538,7 @@ export default function LeadDetailPage() {
             <Label className="text-muted-foreground text-xs">Email</Label>
             {isEditingPersonal ? <Input value={personalForm.email} onChange={(e) => setPersonalForm({ ...personalForm, email: e.target.value })} className="h-8 mt-1" /> : <p className="mt-1 text-sm">{lead.email || "—"}</p>}
           </div>
-          <div className="col-span-1 md:col-span-2 grid grid-cols-3 gap-2">
+          <div className="col-span-1 md:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
             <div>
               <Label className="text-muted-foreground text-xs">City</Label>
               {isEditingPersonal ? <Input value={personalForm.city} onChange={(e) => setPersonalForm({ ...personalForm, city: e.target.value })} className="h-8 mt-1" placeholder="City" /> : <p className="mt-1 text-sm">{lead.city || "—"}</p>}
@@ -710,7 +710,7 @@ export default function LeadDetailPage() {
             const revType = typeMatch ? typeMatch[1] : "Revision";
             return (
               <div key={rev.id} className="p-4 rounded-lg border-l-4 border-primary bg-muted/20">
-                <div className="flex justify-between items-start">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
                   <div>
                     <div className="flex items-center gap-2">
                       {revisionTypeIcons[revType] ?? <FileText className="h-4 w-4" />}
@@ -884,7 +884,7 @@ export default function LeadDetailPage() {
                 </Select>
               </div>
             )}
-            <div className="col-span-2">
+            <div className="col-span-1 md:col-span-2">
               <Label>Notes</Label>
               <Textarea
                 value={taskForm.notes}

@@ -297,7 +297,7 @@ export default function LeadsActivityPage() {
         {/* ═══ ACTIVITY TRACKER ═══ */}
         <TabsContent value="activity" className="space-y-4">
           {/* Search */}
-          <div className="relative max-w-sm">
+          <div className="relative w-full max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search by lead, client ID, activity..."
@@ -309,7 +309,7 @@ export default function LeadsActivityPage() {
 
           {/* Table */}
           <div className="overflow-auto rounded-lg border" style={{ maxHeight: "70vh" }}>
-            <table className="w-full text-sm">
+            <table className="w-full text-sm" style={{ minWidth: "700px" }}>
               <thead className="bg-muted/50 sticky top-0 z-10">
                 <tr>
                   {/* Date column with date-range filter */}
@@ -539,7 +539,7 @@ export default function LeadsActivityPage() {
 
           {/* Table */}
           <div className="overflow-auto rounded-lg border" style={{ maxHeight: "70vh" }}>
-            <table className="w-full text-sm">
+            <table className="w-full text-sm" style={{ minWidth: "600px" }}>
               <thead className="bg-muted/50 sticky top-0 z-10">
                 <tr>
                   <th className="text-left py-3 px-4 whitespace-nowrap">Itinerary Code</th>

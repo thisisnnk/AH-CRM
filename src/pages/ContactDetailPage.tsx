@@ -181,7 +181,7 @@ export default function ContactDetailPage() {
             <Label className="text-muted-foreground text-xs">Email</Label>
             {isEditingPersonal ? <Input value={personalForm.email} onChange={(e) => setPersonalForm({ ...personalForm, email: e.target.value })} className="h-8 mt-1" /> : <p className="mt-1 text-sm">{contact.email || "—"}</p>}
           </div>
-          <div className="col-span-1 md:col-span-2 grid grid-cols-3 gap-2">
+          <div className="col-span-1 md:col-span-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
             <div>
               <Label className="text-muted-foreground text-xs">City</Label>
               {isEditingPersonal ? <Input value={personalForm.city} onChange={(e) => setPersonalForm({ ...personalForm, city: e.target.value })} className="h-8 mt-1" placeholder="City" /> : <p className="mt-1 text-sm">{contact.city || "—"}</p>}
@@ -206,7 +206,7 @@ export default function ContactDetailPage() {
             <p className="text-sm text-muted-foreground">No trips linked yet</p>
           ) : (
             <div className="overflow-x-auto rounded-lg border">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm" style={{ minWidth: "500px" }}>
                 <thead className="bg-muted/50">
                   <tr>
                     <th className="text-left py-3 px-4">Itinerary Code</th>

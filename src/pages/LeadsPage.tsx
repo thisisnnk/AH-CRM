@@ -364,11 +364,11 @@ export default function LeadsPage() {
               <DialogTrigger asChild>
                 <Button size="sm"><Plus className="h-4 w-4 mr-1" /> New Lead</Button>
               </DialogTrigger>
-              <DialogContent className="max-h-[90vh] overflow-y-auto">
+              <DialogContent className="w-[calc(100vw-2rem)] max-w-lg max-h-[90vh] overflow-y-auto">
                 <DialogHeader><DialogTitle>Create Lead</DialogTitle></DialogHeader>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="col-span-2"><Label>Name *</Label><Input value={newLead.name} onChange={(e) => setNewLead({ ...newLead, name: e.target.value })} /></div>
-                  <div className="col-span-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="col-span-1 sm:col-span-2"><Label>Name *</Label><Input value={newLead.name} onChange={(e) => setNewLead({ ...newLead, name: e.target.value })} /></div>
+                  <div className="col-span-1 sm:col-span-2">
                     <PhoneInput
                       label="Phone" required
                       dialCode={phoneDialCode} number={phoneNumber}
@@ -376,7 +376,7 @@ export default function LeadsPage() {
                       onNumberChange={setPhoneNumber}
                     />
                   </div>
-                  <div className="col-span-2">
+                  <div className="col-span-1 sm:col-span-2">
                     <PhoneInput
                       label="WhatsApp"
                       dialCode={waDialCode} number={waNumber}
@@ -518,7 +518,7 @@ export default function LeadsPage() {
       )}
 
       {/* Search */}
-      <div className="relative max-w-sm">
+      <div className="relative w-full max-w-sm">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input placeholder="Search leads..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
       </div>
