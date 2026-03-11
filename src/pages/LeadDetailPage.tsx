@@ -317,7 +317,7 @@ export default function LeadDetailPage() {
         call_recording_url: revForm.type === "Call Recording" ? (fileUrl ?? "") : "",
         itinerary_link: (revForm.type === "Revised Itinerary" || revForm.type === "Chat Screenshot") ? (fileUrl ?? "") : "",
         notes: `[${revForm.type}] ${revForm.notes}`,
-        send_status: revForm.type === "Revised Itinerary" ? "Sent" : "Submitted",
+        send_status: revForm.type === "Revised Itinerary" ? "Sent" : "Pending",
         date_sent: revForm.type === "Revised Itinerary" ? new Date().toISOString() : null,
         lead_id: id!,
         created_by: user.id,
@@ -731,9 +731,8 @@ export default function LeadDetailPage() {
                   <div className="text-right">
                     <span className={cn("text-xs px-2 py-0.5 rounded-full",
                       rev.send_status === "Sent" ? "bg-success/10 text-success" :
-                      rev.send_status === "Submitted" ? "bg-info/10 text-info" :
-                      "bg-warning/10 text-warning")}>
-                      {rev.send_status}
+                      "bg-info/10 text-info")}>
+                      {rev.send_status === "Sent" ? "Sent" : "Submitted"}
                     </span>
                     <p className="text-xs text-muted-foreground mt-1">{format(new Date(rev.created_at!), "MMM d, yyyy")}</p>
                   </div>
