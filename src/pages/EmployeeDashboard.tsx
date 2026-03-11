@@ -74,19 +74,24 @@ export default function EmployeeDashboard() {
     staleTime: 30_000,
   });
 
+  // Auto-upload as soon as a file is selected — no separate "Upload File" step needed
+  const handleAutoUpload = async (f: File) => {
+    setProofUploading(true);
+    setProofProgress(0);
+    try {
+      const url = await uploadToR2(f, "task-proofs", setProofProgress);
+      setProofUrl(url);
+      setProofUploaded(true);
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+      setProofFile(null);
+    }
+    setProofUploading(false);
+  };
+
+  // Submit only writes to DB — upload is already done by handleAutoUpload
   const submitProof = useMutation({
-    mutationFn: async ({ taskId, leadId }: { taskId: string; leadId: string }) => {
-      if (!proofFile) throw new Error("No file selected");
-      setProofUploading(true);
-      setProofProgress(0);
-      let url: string;
-      try {
-        url = await uploadToR2(proofFile, "task-proofs", setProofProgress);
-        setProofUrl(url);
-        setProofUploaded(true);
-      } finally {
-        setProofUploading(false);
-      }
+    mutationFn: async ({ taskId, url, leadId }: { taskId: string; url: string; leadId: string }) => {
       const { error } = await supabase.from("tasks").update({
         proof_url: url,
         proof_submitted: true,
@@ -109,7 +114,6 @@ export default function EmployeeDashboard() {
     },
     onError: (err: any) => {
       console.error("Submit proof error:", err);
-      setProofUploading(false);
       toast({ title: "Error submitting proof", description: err.message, variant: "destructive" });
       queryClient.invalidateQueries({ queryKey: ["my-tasks", user?.id] });
     },
@@ -336,10 +340,13 @@ export default function EmployeeDashboard() {
                     accept="image/*,video/*,.pdf,.doc,.docx"
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     onChange={(e) => {
-                      setProofFile(e.target.files?.[0] ?? null);
+                      const f = e.target.files?.[0] ?? null;
+                      if (!f) return;
+                      setProofFile(f);
                       setProofUploaded(false);
                       setProofUrl(null);
                       setProofProgress(0);
+                      handleAutoUpload(f);
                     }}
                   />
                 </div>
@@ -348,17 +355,17 @@ export default function EmployeeDashboard() {
 
             <Button
               className="w-full"
-              disabled={!proofFile || submitProof.isPending}
+              disabled={!proofUploaded || !proofUrl || submitProof.isPending}
               onClick={() => {
                 const task = tasks.find((t) => t.id === proofTaskId);
-                if (proofTaskId && task) {
-                  submitProof.mutate({ taskId: proofTaskId, leadId: task.lead_id });
+                if (!proofTaskId || !proofUrl || !task) {
+                  toast({ title: "Please wait for the file to finish uploading", variant: "destructive" });
+                  return;
                 }
+                submitProof.mutate({ taskId: proofTaskId, url: proofUrl, leadId: task.lead_id });
               }}
             >
-              {submitProof.isPending
-                ? (proofUploading ? `Uploading... ${proofProgress}%` : "Submitting...")
-                : "Submit Proof & Complete Task"}
+              {submitProof.isPending ? "Submitting..." : "Submit Proof & Complete Task"}
             </Button>
           </div>
         </DialogContent>

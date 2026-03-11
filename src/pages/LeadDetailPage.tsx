@@ -468,31 +468,32 @@ export default function LeadDetailPage() {
   };
 
   // ── Handlers ──
-  const handleItineraryUpload = async () => {
-    if (!itineraryFile) return;
+  // Auto-upload the moment a file is chosen — no separate "Upload File" button tap needed
+  const handleItineraryUpload = async (file: File) => {
     setItineraryUploading(true);
     setItineraryProgress(0);
     try {
-      const url = await uploadFile(itineraryFile, "itineraries", setItineraryProgress);
+      const url = await uploadFile(file, "itineraries", setItineraryProgress);
       setItineraryUrl(url);
       setItineraryUploaded(true);
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+      setItineraryFile(null);
     }
     setItineraryUploading(false);
   };
 
-  const handleRevFileUpload = async () => {
-    if (!revFile) return;
-    const folder = revForm.type === "Call Recording" ? "recordings" : revForm.type === "Revised Itinerary" ? "itineraries" : "revisions";
+  const handleRevFileUpload = async (file: File, type: string) => {
+    const folder = type === "Call Recording" ? "recordings" : type === "Revised Itinerary" ? "itineraries" : "revisions";
     setRevUploading(true);
     setRevProgress(0);
     try {
-      const url = await uploadFile(revFile, folder, setRevProgress);
+      const url = await uploadFile(file, folder, setRevProgress);
       setRevFileUrl(url);
       setRevUploaded(true);
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+      setRevFile(null);
     }
     setRevUploading(false);
   };
@@ -682,25 +683,25 @@ export default function LeadDetailPage() {
                 accept=".pdf,.doc,.docx,.xls,.xlsx,image/*"
                 label="Itinerary File *"
                 file={itineraryFile}
-                onSelect={(f) => { setItineraryFile(f); setItineraryUploaded(false); setItineraryUrl(null); setItineraryProgress(0); }}
+                onSelect={(f) => {
+                  if (!f) return;
+                  setItineraryFile(f);
+                  setItineraryUploaded(false);
+                  setItineraryUrl(null);
+                  setItineraryProgress(0);
+                  handleItineraryUpload(f);
+                }}
                 onRemove={() => { setItineraryFile(null); setItineraryUploaded(false); setItineraryUrl(null); setItineraryProgress(0); }}
                 uploading={itineraryUploading}
                 progress={itineraryProgress}
                 uploaded={itineraryUploaded}
               />
 
-              <div className="flex gap-2">
-                {itineraryFile && !itineraryUploaded && !itineraryUploading && (
-                  <Button variant="outline" onClick={handleItineraryUpload}>
-                    <Upload className="h-4 w-4 mr-1" /> Upload File
-                  </Button>
-                )}
-                {itineraryUploaded && (
-                  <Button onClick={() => submitItinerary.mutate()} disabled={submitItinerary.isPending}>
-                    <Upload className="h-4 w-4 mr-1" /> Submit Itinerary
-                  </Button>
-                )}
-              </div>
+              {itineraryUploaded && (
+                <Button onClick={() => submitItinerary.mutate()} disabled={submitItinerary.isPending}>
+                  <Upload className="h-4 w-4 mr-1" /> Submit Itinerary
+                </Button>
+              )}
             </>
           )}
         </CardContent>
@@ -770,17 +771,19 @@ export default function LeadDetailPage() {
                   accept={revForm.type === "Chat Screenshot" ? "image/*" : revForm.type === "Call Recording" ? "audio/*,video/*" : ".pdf,.doc,.docx,image/*"}
                   label={revForm.type === "Chat Screenshot" ? "Screenshot File *" : revForm.type === "Call Recording" ? "Recording File *" : "Itinerary File *"}
                   file={revFile}
-                  onSelect={(f) => { setRevFile(f); setRevUploaded(false); setRevFileUrl(null); setRevProgress(0); }}
+                  onSelect={(f) => {
+                    if (!f) return;
+                    setRevFile(f);
+                    setRevUploaded(false);
+                    setRevFileUrl(null);
+                    setRevProgress(0);
+                    handleRevFileUpload(f, revForm.type);
+                  }}
                   onRemove={() => { setRevFile(null); setRevUploaded(false); setRevFileUrl(null); setRevProgress(0); }}
                   uploading={revUploading}
                   progress={revProgress}
                   uploaded={revUploaded}
                 />
-                {revFile && !revUploaded && !revUploading && (
-                  <Button variant="outline" onClick={handleRevFileUpload}>
-                    <Upload className="h-4 w-4 mr-1" /> Upload File
-                  </Button>
-                )}
               </>
             )}
 

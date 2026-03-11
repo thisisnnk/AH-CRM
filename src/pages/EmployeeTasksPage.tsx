@@ -28,16 +28,17 @@ export default function EmployeeTasksPage() {
   const [proofUrl, setProofUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleProofUpload = async () => {
-    if (!proofFile) return;
+  // Auto-upload as soon as a file is selected — no separate "Upload File" step needed
+  const handleAutoUpload = async (f: File) => {
     setProofUploading(true);
     setProofProgress(0);
     try {
-      const url = await uploadToR2(proofFile, "task-proofs", setProofProgress);
+      const url = await uploadToR2(f, "task-proofs", setProofProgress);
       setProofUrl(url);
       setProofUploaded(true);
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+      setProofFile(null);
     }
     setProofUploading(false);
   };
@@ -285,31 +286,29 @@ export default function EmployeeTasksPage() {
                     accept="image/*,video/*,.pdf,.doc,.docx"
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     onChange={(e) => {
-                      setProofFile(e.target.files?.[0] ?? null);
+                      const f = e.target.files?.[0] ?? null;
+                      if (!f) return;
+                      setProofFile(f);
                       setProofUploaded(false);
                       setProofUrl(null);
                       setProofProgress(0);
+                      handleAutoUpload(f);
                     }}
                   />
                 </div>
               )}
             </div>
 
-            {proofFile && !proofUploaded && (
-              <Button variant="outline" className="w-full" onClick={handleProofUpload} disabled={proofUploading}>
-                <Upload className="h-4 w-4 mr-2" />
-                {proofUploading ? `Uploading... ${proofProgress}%` : "Upload File"}
-              </Button>
-            )}
-
             <Button
               className="w-full"
-              disabled={!proofUploaded || submitProof.isPending}
+              disabled={!proofUploaded || !proofUrl || submitProof.isPending}
               onClick={() => {
                 const task = tasks.find((t) => t.id === proofTaskId);
-                if (proofTaskId && proofUrl && task) {
-                  submitProof.mutate({ taskId: proofTaskId, url: proofUrl, leadId: task.lead_id });
+                if (!proofTaskId || !proofUrl || !task) {
+                  toast({ title: "Please wait for the file to finish uploading", variant: "destructive" });
+                  return;
                 }
+                submitProof.mutate({ taskId: proofTaskId, url: proofUrl, leadId: task.lead_id });
               }}
             >
               {submitProof.isPending ? "Submitting..." : "Submit Proof & Complete Task"}
