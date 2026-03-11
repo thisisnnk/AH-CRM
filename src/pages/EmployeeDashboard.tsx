@@ -325,12 +325,16 @@ export default function EmployeeDashboard() {
                   )}
                 </div>
               ) : (
-                <label className="cursor-pointer w-full block">
+                <div className="relative w-full">
+                  <div className="w-full flex flex-col items-center justify-center gap-1 border border-dashed rounded-md h-16 hover:bg-muted/50 transition-colors pointer-events-none">
+                    <Upload className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Choose File</span>
+                  </div>
                   <input
                     ref={fileInputRef}
                     type="file"
                     accept="image/*,video/*,.pdf,.doc,.docx"
-                    className="sr-only"
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                     onChange={(e) => {
                       setProofFile(e.target.files?.[0] ?? null);
                       setProofUploaded(false);
@@ -338,11 +342,7 @@ export default function EmployeeDashboard() {
                       setProofProgress(0);
                     }}
                   />
-                  <div className="w-full flex flex-col items-center justify-center gap-1 border border-dashed rounded-md h-16 hover:bg-muted/50 transition-colors">
-                    <Upload className="h-5 w-5 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">Choose File</span>
-                  </div>
-                </label>
+                </div>
               )}
             </div>
 

@@ -14,9 +14,6 @@ import { toast } from "@/hooks/use-toast";
 import { ArrowLeft, Upload, Phone, Mail, MapPin, ExternalLink, FileText, MessageSquare, Mic, RefreshCw, X, Loader2, CheckCircle } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { CalendarIcon } from "lucide-react";
 import { sendNotification } from "@/utils/notificationHelper";
 import { uploadToR2 } from "@/utils/uploadToR2";
 
@@ -94,25 +91,26 @@ function FileUploadWidget({
   }
 
   // State: No file — show styled Choose File button
+  // Uses overlay input (not sr-only) for reliable mobile/iOS Safari touch support
   return (
     <div className="space-y-1">
       <Label className="text-xs text-muted-foreground">{label}</Label>
-      <label className="cursor-pointer w-full block">
+      <div className="relative w-full">
+        <div className="w-full flex items-center justify-start gap-2 px-3 py-2 border border-dashed rounded-md hover:bg-muted/50 transition-colors min-h-[40px] pointer-events-none">
+          <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+          <span className="text-sm text-muted-foreground">Choose File</span>
+        </div>
         <input
           ref={inputRef}
           type="file"
           accept={accept}
-          className="sr-only"
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
           onChange={(e) => {
             onSelect(e.target.files?.[0] ?? null);
             e.target.value = ""; // Reset so re-selecting same file works
           }}
         />
-        <div className="w-full flex items-center justify-start gap-2 px-3 py-2 border border-dashed rounded-md hover:bg-muted/50 transition-colors min-h-[40px]">
-          <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
-          <span className="text-sm text-muted-foreground">Choose File</span>
-        </div>
-      </label>
+      </div>
     </div>
   );
 }
@@ -872,15 +870,16 @@ export default function LeadDetailPage() {
             </div>
             <div>
               <Label>Follow Up Date *</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="w-full justify-start">
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {taskForm.followUpDate ? format(taskForm.followUpDate, "PPP") : "Pick date"}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={taskForm.followUpDate} onSelect={(d) => setTaskForm({ ...taskForm, followUpDate: d })} className="p-3 pointer-events-auto" /></PopoverContent>
-              </Popover>
+              <Input
+                type="date"
+                min={format(new Date(), "yyyy-MM-dd")}
+                value={taskForm.followUpDate ? format(taskForm.followUpDate, "yyyy-MM-dd") : ""}
+                onChange={(e) => {
+                  const d = e.target.value ? new Date(e.target.value + "T00:00:00") : undefined;
+                  setTaskForm({ ...taskForm, followUpDate: d });
+                }}
+                className="w-full"
+              />
             </div>
             {isAdmin && (
               <div>
