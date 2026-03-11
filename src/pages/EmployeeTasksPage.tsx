@@ -251,18 +251,6 @@ export default function EmployeeTasksPage() {
             <div>
               <Label className="text-sm font-medium">Proof File *</Label>
               <p className="text-xs text-muted-foreground mb-2">Screenshot, document, or photo of task completion</p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,video/*,.pdf,.doc,.docx"
-                className="hidden"
-                onChange={(e) => {
-                  setProofFile(e.target.files?.[0] ?? null);
-                  setProofUploaded(false);
-                  setProofUrl(null);
-                  setProofProgress(0);
-                }}
-              />
               {proofFile ? (
                 <div className="rounded-lg border bg-muted/20 overflow-hidden">
                   <div className="flex items-center gap-2 p-3">
@@ -286,10 +274,24 @@ export default function EmployeeTasksPage() {
                   )}
                 </div>
               ) : (
-                <Button variant="outline" className="w-full border-dashed h-16 flex-col gap-1" onClick={() => fileInputRef.current?.click()}>
-                  <Upload className="h-5 w-5 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">Choose File</span>
-                </Button>
+                <label className="cursor-pointer w-full block">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,video/*,.pdf,.doc,.docx"
+                    className="sr-only"
+                    onChange={(e) => {
+                      setProofFile(e.target.files?.[0] ?? null);
+                      setProofUploaded(false);
+                      setProofUrl(null);
+                      setProofProgress(0);
+                    }}
+                  />
+                  <div className="w-full flex flex-col items-center justify-center gap-1 border border-dashed rounded-md h-16 hover:bg-muted/50 transition-colors">
+                    <Upload className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">Choose File</span>
+                  </div>
+                </label>
               )}
             </div>
 

@@ -97,25 +97,22 @@ function FileUploadWidget({
   return (
     <div className="space-y-1">
       <Label className="text-xs text-muted-foreground">{label}</Label>
-      <input
-        ref={inputRef}
-        type="file"
-        accept={accept}
-        className="hidden"
-        onChange={(e) => {
-          onSelect(e.target.files?.[0] ?? null);
-          e.target.value = ""; // Reset so re-selecting same file works
-        }}
-      />
-      <Button
-        type="button"
-        variant="outline"
-        className="w-full justify-start gap-2 border-dashed"
-        onClick={() => inputRef.current?.click()}
-      >
-        <Upload className="h-4 w-4 text-muted-foreground" />
-        <span className="text-muted-foreground">Choose File</span>
-      </Button>
+      <label className="cursor-pointer w-full block">
+        <input
+          ref={inputRef}
+          type="file"
+          accept={accept}
+          className="sr-only"
+          onChange={(e) => {
+            onSelect(e.target.files?.[0] ?? null);
+            e.target.value = ""; // Reset so re-selecting same file works
+          }}
+        />
+        <div className="w-full flex items-center justify-start gap-2 px-3 py-2 border border-dashed rounded-md hover:bg-muted/50 transition-colors min-h-[40px]">
+          <Upload className="h-4 w-4 text-muted-foreground shrink-0" />
+          <span className="text-sm text-muted-foreground">Choose File</span>
+        </div>
+      </label>
     </div>
   );
 }
