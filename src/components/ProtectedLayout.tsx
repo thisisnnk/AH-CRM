@@ -7,7 +7,7 @@ import { TopNav } from "@/components/TopNav";
 import { Loader2 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { subDays, endOfDay } from "date-fns";
+import { subDays, endOfDay, format } from "date-fns";
 
 // Fires all commonly-used queries in the background as soon as auth is ready.
 // By the time the user navigates to any page the data is already in cache.
@@ -43,7 +43,7 @@ function DataPrefetcher() {
     const from = subDays(new Date(), 90);
     const to = new Date();
     queryClient.prefetchQuery({
-      queryKey: ["leads", from, to, user.id, role],
+      queryKey: ["leads", format(from, "yyyy-MM-dd"), format(to, "yyyy-MM-dd"), user.id, role, ""],
       queryFn: async () => {
         let query = supabase
           .from("leads")

@@ -42,7 +42,7 @@ export default function EmployeeDashboard() {
   const [toDate, setToDate] = useState<Date>(new Date());
 
   const { data: leads = [], isLoading: leadsLoading } = useQuery({
-    queryKey: ["my-leads", user?.id, fromDate, toDate],
+    queryKey: ["my-leads", user?.id, format(fromDate, "yyyy-MM-dd"), format(toDate, "yyyy-MM-dd")],
     queryFn: async () => {
       if (!user) return [];
       const { data } = await supabase
@@ -94,9 +94,13 @@ export default function EmployeeDashboard() {
         completed_at: new Date().toISOString(),
       }).eq("id", taskId);
       if (error) throw error;
-      await supabase.from("activity_logs").insert({
-        lead_id: leadId, user_id: user!.id, action: "Task proof uploaded", details: url,
-      });
+      try {
+        await supabase.from("activity_logs").insert({
+          lead_id: leadId, user_id: user!.id, action: "Task proof uploaded", details: url,
+        });
+      } catch {
+        // non-fatal — task is already marked complete
+      }
     },
     onSuccess: () => {
       toast({ title: "Proof submitted", description: "Task marked as completed." });
@@ -107,6 +111,7 @@ export default function EmployeeDashboard() {
       console.error("Submit proof error:", err);
       setProofUploading(false);
       toast({ title: "Error submitting proof", description: err.message, variant: "destructive" });
+      queryClient.invalidateQueries({ queryKey: ["my-tasks", user?.id] });
     },
   });
 

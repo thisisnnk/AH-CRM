@@ -103,7 +103,7 @@ export default function AdminDashboard() {
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
   const { data: leads = [], isLoading: leadsLoading } = useQuery({
-    queryKey: ["dashboard-leads", fromDate, toDate],
+    queryKey: ["dashboard-leads", format(fromDate, "yyyy-MM-dd"), format(toDate, "yyyy-MM-dd")],
     queryFn: async () => {
       const { data } = await supabase
         .from("leads")

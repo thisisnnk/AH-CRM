@@ -50,7 +50,7 @@ export default function LeadsPage() {
   const [waNumber, setWaNumber] = useState("");
 
   const { data: leads = [], isLoading: leadsLoading } = useQuery({
-    queryKey: ["leads", fromDate, toDate, user?.id, role, search],
+    queryKey: ["leads", format(fromDate, "yyyy-MM-dd"), format(toDate, "yyyy-MM-dd"), user?.id, role, search],
     queryFn: async () => {
       let query = supabase
         .from("leads")
