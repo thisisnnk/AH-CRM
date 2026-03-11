@@ -228,7 +228,11 @@ export default function EmployeeTasksPage() {
 
       {/* Submit Proof Dialog */}
       <Dialog open={!!proofTaskId} onOpenChange={(open) => { if (!open) resetProofDialog(); }}>
-        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className="w-[calc(100%-2rem)] sm:max-w-md max-h-[90vh] overflow-y-auto"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>Submit Task Proof</DialogTitle>
           </DialogHeader>
@@ -250,7 +254,7 @@ export default function EmployeeTasksPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,.pdf,.doc,.docx"
+                accept="image/*,video/*,.pdf,.doc,.docx"
                 className="hidden"
                 onChange={(e) => {
                   setProofFile(e.target.files?.[0] ?? null);
