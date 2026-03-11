@@ -144,8 +144,9 @@ export default function LeadDetailPage() {
   const [revUploaded, setRevUploaded] = useState(false);
   const [revFileUrl, setRevFileUrl] = useState<string | null>(null);
 
-  // Task form state
+  // Task form state — assignedTo pre-populated from lead once data loads
   const [taskForm, setTaskForm] = useState({ followUpDate: undefined as Date | undefined, notes: "", assignedTo: "" });
+  const [taskFormInitialized, setTaskFormInitialized] = useState(false);
 
   // Task proof upload state
   const [proofTaskId, setProofTaskId] = useState<string | null>(null);
@@ -225,6 +226,14 @@ export default function LeadDetailPage() {
       queryClient.invalidateQueries({ queryKey: ["activities", id] });
     });
   }, [id]);
+
+  // ── Pre-populate task assignee from lead's assigned employee ──
+  useEffect(() => {
+    if (lead?.assigned_employee_id && !taskFormInitialized) {
+      setTaskForm((prev) => ({ ...prev, assignedTo: lead.assigned_employee_id! }));
+      setTaskFormInitialized(true);
+    }
+  }, [lead?.assigned_employee_id, taskFormInitialized]);
 
   // ── Mutations ──
   const updateLead = useMutation({
@@ -354,7 +363,8 @@ export default function LeadDetailPage() {
   const createTask = useMutation({
     mutationFn: async () => {
       if (!user || !taskForm.followUpDate) throw new Error("Missing required fields");
-      const assignedTo = taskForm.assignedTo || lead?.assigned_employee_id || user.id;
+      if (isAdmin && !taskForm.assignedTo) throw new Error("Please select an employee to assign this task to");
+      const assignedTo = taskForm.assignedTo || user.id;
       const taskDescription = taskForm.notes.trim() || `Task for ${lead?.name ?? "lead"}`;
 
       const { error } = await supabase.from("tasks").insert({
@@ -498,7 +508,7 @@ export default function LeadDetailPage() {
     "Revised Itinerary": <RefreshCw className="h-4 w-4" />,
   };
 
-  const canSubmitRevision = revForm.type && revForm.notes.trim() && revUploaded;
+  const canSubmitRevision = !!(revForm.type && revUploaded);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -781,7 +791,7 @@ export default function LeadDetailPage() {
 
 
             {revForm.type && (
-              <div><Label>Notes *</Label><Textarea value={revForm.notes} onChange={(e) => setRevForm({ ...revForm, notes: e.target.value })} placeholder="Describe the revision..." /></div>
+              <div><Label>Notes <span className="text-muted-foreground font-normal">(optional)</span></Label><Textarea value={revForm.notes} onChange={(e) => setRevForm({ ...revForm, notes: e.target.value })} placeholder="Describe the revision..." /></div>
             )}
 
             <Button onClick={() => addRevision.mutate()} disabled={!canSubmitRevision || addRevision.isPending}>
@@ -877,11 +887,15 @@ export default function LeadDetailPage() {
             </div>
             {isAdmin && (
               <div>
-                <Label>Assign To</Label>
+                <Label>Assign To <span className="text-destructive">*</span></Label>
                 <Select value={taskForm.assignedTo} onValueChange={(v) => setTaskForm({ ...taskForm, assignedTo: v })}>
-                  <SelectTrigger><SelectValue placeholder="Current employee" /></SelectTrigger>
-                  <SelectContent>{employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}</SelectContent>
+                  <SelectTrigger className={!taskForm.assignedTo ? "border-amber-400" : ""}><SelectValue placeholder="Select employee to assign" /></SelectTrigger>
+                  <SelectContent>
+                    {employees.length === 0 && <SelectItem value="_none" disabled>No active employees found</SelectItem>}
+                    {employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}
+                  </SelectContent>
                 </Select>
+                {!taskForm.assignedTo && <p className="text-xs text-amber-600 mt-1">Please select an employee to assign this task to.</p>}
               </div>
             )}
             <div className="col-span-1 md:col-span-2">
@@ -894,7 +908,10 @@ export default function LeadDetailPage() {
               />
             </div>
           </div>
-          <Button onClick={() => createTask.mutate()} disabled={!taskForm.followUpDate || createTask.isPending}>
+          <Button
+            onClick={() => createTask.mutate()}
+            disabled={!taskForm.followUpDate || (isAdmin && !taskForm.assignedTo) || createTask.isPending}
+          >
             Add Task
           </Button>
         </CardContent>

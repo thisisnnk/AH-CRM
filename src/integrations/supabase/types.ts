@@ -138,6 +138,7 @@ export type Database = {
           phone: string
           state: string | null
           status: string | null
+          tour_category: string | null
           travelers: number | null
           trip_duration: string | null
           updated_at: string | null
@@ -162,6 +163,7 @@ export type Database = {
           phone: string
           state?: string | null
           status?: string | null
+          tour_category?: string | null
           travelers?: number | null
           trip_duration?: string | null
           updated_at?: string | null
@@ -186,6 +188,7 @@ export type Database = {
           phone?: string
           state?: string | null
           status?: string | null
+          tour_category?: string | null
           travelers?: number | null
           trip_duration?: string | null
           updated_at?: string | null
