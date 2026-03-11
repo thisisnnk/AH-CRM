@@ -228,7 +228,7 @@ export default function EmployeeTasksPage() {
 
       {/* Submit Proof Dialog */}
       <Dialog open={!!proofTaskId} onOpenChange={(open) => { if (!open) resetProofDialog(); }}>
-        <DialogContent className="w-full max-w-md mx-4">
+        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Submit Task Proof</DialogTitle>
           </DialogHeader>

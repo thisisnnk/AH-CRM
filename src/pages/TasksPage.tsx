@@ -63,7 +63,7 @@ export default function TasksPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from("tasks")
-        .select("*")
+        .select("*, leads(name)")
         .eq("status", "Completed")
         .order("completed_at", { ascending: false });
       return data ?? [];
@@ -77,7 +77,7 @@ export default function TasksPage() {
     queryFn: async () => {
       const { data } = await supabase
         .from("tasks")
-        .select("*")
+        .select("*, leads(name)")
         .neq("status", "Completed")
         .order("created_at", { ascending: false });
       return data ?? [];
@@ -338,11 +338,12 @@ export default function TasksPage() {
           {/* ── Completed Tasks table ── */}
           {historyPill === "completed" && (
             <div className="overflow-auto rounded-lg border" style={{ maxHeight: "70vh" }}>
-              <table className="w-full text-sm" style={{ minWidth: "1000px" }}>
+              <table className="w-full text-sm" style={{ minWidth: "1100px" }}>
                 <thead className="bg-muted/50 sticky top-0 z-10">
                   <tr>
                     <th className="text-left py-3 px-4 whitespace-nowrap">Created Date</th>
                     <th className="text-left py-3 px-4 whitespace-nowrap">Time</th>
+                    <th className="text-left py-3 px-4 whitespace-nowrap min-w-[160px]">Lead Name</th>
                     <th className="text-left py-3 px-4 whitespace-nowrap min-w-[220px]">Task Description</th>
                     <th className="text-left py-3 px-4 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1">
@@ -360,9 +361,9 @@ export default function TasksPage() {
                 </thead>
                 <tbody>
                   {completedLoading ? (
-                    <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">Loading...</td></tr>
+                    <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">Loading...</td></tr>
                   ) : visibleCompleted.length === 0 ? (
-                    <tr><td colSpan={7} className="py-8 text-center text-muted-foreground">No completed tasks found</td></tr>
+                    <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">No completed tasks found</td></tr>
                   ) : (
                     visibleCompleted.map((t) => (
                       <tr key={t.id} className="border-b hover:bg-muted/30">
@@ -372,6 +373,7 @@ export default function TasksPage() {
                         <td className="py-3 px-4 whitespace-nowrap text-muted-foreground">
                           {t.created_at ? format(new Date(t.created_at), "hh:mm a") : "—"}
                         </td>
+                        <td className="py-3 px-4 whitespace-nowrap">{(t as any).leads?.name ?? "—"}</td>
                         <td className="py-3 px-4">{t.description || t.notes || "—"}</td>
                         <td className="py-3 px-4 whitespace-nowrap">{empMap[t.assigned_employee_id] ?? "—"}</td>
                         <td className="py-3 px-4 whitespace-nowrap text-muted-foreground">
@@ -405,10 +407,11 @@ export default function TasksPage() {
           {/* ── Incomplete Tasks table ── */}
           {historyPill === "incomplete" && (
             <div className="overflow-auto rounded-lg border" style={{ maxHeight: "70vh" }}>
-              <table className="w-full text-sm" style={{ minWidth: "700px" }}>
+              <table className="w-full text-sm" style={{ minWidth: "860px" }}>
                 <thead className="bg-muted/50 sticky top-0 z-10">
                   <tr>
                     <th className="text-left py-3 px-4 whitespace-nowrap">Created Date & Time</th>
+                    <th className="text-left py-3 px-4 whitespace-nowrap min-w-[160px]">Lead Name</th>
                     <th className="text-left py-3 px-4 whitespace-nowrap min-w-[240px]">Task Description</th>
                     <th className="text-left py-3 px-4 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1">
@@ -425,9 +428,9 @@ export default function TasksPage() {
                 </thead>
                 <tbody>
                   {incompleteLoading ? (
-                    <tr><td colSpan={5} className="py-8 text-center text-muted-foreground">Loading...</td></tr>
+                    <tr><td colSpan={6} className="py-8 text-center text-muted-foreground">Loading...</td></tr>
                   ) : visibleIncomplete.length === 0 ? (
-                    <tr><td colSpan={5} className="py-8 text-center text-muted-foreground">No incomplete tasks found</td></tr>
+                    <tr><td colSpan={6} className="py-8 text-center text-muted-foreground">No incomplete tasks found</td></tr>
                   ) : (
                     visibleIncomplete.map((t) => {
                       const isOverdue = new Date(t.follow_up_date) < new Date();
@@ -438,6 +441,7 @@ export default function TasksPage() {
                               ? `${format(new Date(t.created_at), "MMM d, yyyy")} ${format(new Date(t.created_at), "hh:mm a")}`
                               : "—"}
                           </td>
+                          <td className="py-3 px-4 whitespace-nowrap">{(t as any).leads?.name ?? "—"}</td>
                           <td className="py-3 px-4">{t.description || t.notes || "—"}</td>
                           <td className="py-3 px-4 whitespace-nowrap">{empMap[t.assigned_employee_id] ?? "—"}</td>
                           <td className={cn("py-3 px-4 whitespace-nowrap", isOverdue && "text-destructive font-medium")}>
