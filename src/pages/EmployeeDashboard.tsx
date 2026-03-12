@@ -43,6 +43,9 @@ export default function EmployeeDashboard() {
     setSubmitError(null);
     proofUrlRef.current = null;
     if (fileInputRef.current) fileInputRef.current.value = "";
+    // Reset mutation state so re-opening the dialog never shows a stale
+    // "Submitting..." state from a previous (possibly still-pending) attempt.
+    submitProof.reset();
   };
   const [fromDate, setFromDate] = useState<Date>(subDays(new Date(), 30));
   const [toDate, setToDate] = useState<Date>(new Date());

@@ -8,12 +8,27 @@ const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-// Custom fetch with a 30-second timeout so Supabase calls (including auth token
+// Custom fetch with a 12-second timeout so Supabase calls (including auth token
 // refresh) never hang silently on slow mobile connections.
+// Also combines any signal passed by Supabase internals with our timeout signal,
+// so both timeout-abort and Supabase's own abort work correctly.
 const fetchWithTimeout: typeof fetch = (input, init) => {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30_000);
-  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+  const timer = setTimeout(() => controller.abort(), 12_000);
+
+  // Combine Supabase's own signal (if any) with our timeout signal so both work.
+  let signal: AbortSignal = controller.signal;
+  if (init?.signal) {
+    try {
+      // AbortSignal.any is available in Chrome 116+, Firefox 115+, Safari 17.4+
+      signal = (AbortSignal as any).any([controller.signal, init.signal]);
+    } catch {
+      // Fallback: use our controller only (still provides the timeout)
+      signal = controller.signal;
+    }
+  }
+
+  return fetch(input, { ...init, signal }).finally(() => clearTimeout(timer));
 };
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {

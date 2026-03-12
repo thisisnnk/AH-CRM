@@ -59,6 +59,9 @@ export default function EmployeeTasksPage() {
     setSubmitError(null);
     proofUrlRef.current = null;
     if (fileInputRef.current) fileInputRef.current.value = "";
+    // Reset mutation state so re-opening the dialog never shows a stale
+    // "Submitting..." state from a previous (possibly still-pending) attempt.
+    submitProof.reset();
   };
 
   const { data: tasks = [], isLoading } = useQuery({
