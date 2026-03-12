@@ -21,6 +21,7 @@ export default function EmployeeTasksPage() {
   const queryClient = useQueryClient();
 
   const [proofTaskId, setProofTaskId] = useState<string | null>(null);
+  const [proofLeadId, setProofLeadId] = useState<string | null>(null);
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [proofUploaded, setProofUploaded] = useState(false);
   const [proofUploading, setProofUploading] = useState(false);
@@ -54,6 +55,7 @@ export default function EmployeeTasksPage() {
     setProofUploading(false);
     setProofProgress(0);
     setProofUrl(null);
+    setProofLeadId(null);
     setSubmitError(null);
     proofUrlRef.current = null;
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -77,16 +79,21 @@ export default function EmployeeTasksPage() {
 
   const submitProof = useMutation({
     mutationFn: async ({ taskId, url, leadId }: { taskId: string; url: string; leadId: string }) => {
-      const { error } = await supabase.from("tasks").update({
+      if (!user) throw new Error("Session expired. Please sign out and sign in again.");
+
+      const { data: updated, error } = await supabase.from("tasks").update({
         proof_url: url,
         proof_submitted: true,
         status: "Completed",
         completed_at: new Date().toISOString(),
-      }).eq("id", taskId);
+      }).eq("id", taskId).select();
       if (error) throw error;
+      // If 0 rows returned, RLS blocked the write (employee lacks UPDATE permission)
+      if (!updated || updated.length === 0) throw new Error("Permission denied: your account does not have access to update this task. Please contact admin.");
+
       try {
         await supabase.from("activity_logs").insert({
-          lead_id: leadId, user_id: user!.id, action: "Task proof uploaded", details: url,
+          lead_id: leadId, user_id: user.id, action: "Task proof uploaded", details: url,
         });
       } catch {
         // non-fatal — task is already marked complete
@@ -151,7 +158,7 @@ export default function EmployeeTasksPage() {
                 size="sm"
                 variant="outline"
                 className="text-xs h-7 w-full"
-                onClick={(e) => { e.stopPropagation(); setProofTaskId(task.id); setProofFile(null); }}
+                onClick={(e) => { e.stopPropagation(); setProofTaskId(task.id); setProofLeadId(task.lead_id); setProofFile(null); }}
               >
                 <Upload className="h-3 w-3 mr-1" /> Submit Proof
               </Button>
@@ -292,7 +299,8 @@ export default function EmployeeTasksPage() {
                     ref={fileInputRef}
                     type="file"
                     accept="image/*,video/*,.pdf,.doc,.docx"
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    className="absolute inset-0 w-full h-full cursor-pointer"
+                    style={{ opacity: 0.001 }}
                     onChange={(e) => {
                       const f = e.target.files?.[0] ?? null;
                       if (!f) return;
@@ -313,13 +321,12 @@ export default function EmployeeTasksPage() {
                 disabled={!proofUploaded || submitProof.isPending}
                 onClick={() => {
                   const url = proofUrlRef.current;
-                  const task = tasks.find((t) => t.id === proofTaskId);
-                  if (!proofTaskId || !url || !task) {
+                  if (!proofTaskId || !url || !proofLeadId) {
                     setSubmitError("File not ready yet, please wait.");
                     return;
                   }
                   setSubmitError(null);
-                  submitProof.mutate({ taskId: proofTaskId, url, leadId: task.lead_id });
+                  submitProof.mutate({ taskId: proofTaskId, url, leadId: proofLeadId });
                 }}
               >
                 {submitProof.isPending ? "Submitting..." : "Submit Proof & Complete Task"}

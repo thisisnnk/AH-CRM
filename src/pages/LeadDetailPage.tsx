@@ -104,7 +104,8 @@ function FileUploadWidget({
           ref={inputRef}
           type="file"
           accept={accept}
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          className="absolute inset-0 w-full h-full cursor-pointer"
+          style={{ opacity: 0.001 }}
           onChange={(e) => {
             onSelect(e.target.files?.[0] ?? null);
             e.target.value = ""; // Reset so re-selecting same file works
@@ -155,6 +156,7 @@ export default function LeadDetailPage() {
   // (avoids React stale-closure issues on mobile)
   const itineraryUrlRef = useRef<string | null>(null);
   const revFileUrlRef = useRef<string | null>(null);
+  const proofUrlRef = useRef<string | null>(null);
 
   // Inline submission error states (toasts can be missed on mobile)
   const [itinerarySubmitError, setItinerarySubmitError] = useState<string | null>(null);
@@ -270,7 +272,7 @@ export default function LeadDetailPage() {
       if (!url || !user) throw new Error("Upload file first");
 
       const nextNum = revisions.length + 1;
-      const { error: revErr } = await supabase.from("revisions").insert({
+      const { data: inserted, error: revErr } = await supabase.from("revisions").insert({
         revision_number: nextNum,
         call_recording_url: "",
         itinerary_link: url,
@@ -279,8 +281,9 @@ export default function LeadDetailPage() {
         date_sent: new Date().toISOString(),
         lead_id: id!,
         created_by: user.id,
-      });
+      }).select();
       if (revErr) throw revErr;
+      if (!inserted || inserted.length === 0) throw new Error("Permission denied: your account cannot submit itineraries. Please contact admin.");
 
       let extractedCode = lead.itinerary_code || "";
       if (itineraryFile && (!lead.itinerary_code || lead.itinerary_code.startsWith("http"))) {
@@ -299,10 +302,12 @@ export default function LeadDetailPage() {
         last_activity_at: new Date().toISOString(),
       }).eq("id", id!);
 
-      await supabase.from("activity_logs").insert({
-        lead_id: id!, user_id: user.id, action: "Submitted itinerary",
-        details: url,
-      });
+      try {
+        await supabase.from("activity_logs").insert({
+          lead_id: id!, user_id: user.id, action: "Submitted itinerary",
+          details: url,
+        });
+      } catch { /* non-fatal */ }
     },
     onSuccess: () => {
       setItinerarySubmitError(null);
@@ -329,7 +334,7 @@ export default function LeadDetailPage() {
       const fileUrl = url;
       const nextNum = revisions.length + 1;
 
-      const { error: revErr } = await supabase.from("revisions").insert({
+      const { data: inserted, error: revErr } = await supabase.from("revisions").insert({
         revision_number: nextNum,
         call_recording_url: revForm.type === "Call Recording" ? fileUrl : "",
         itinerary_link: (revForm.type === "Revised Itinerary" || revForm.type === "Chat Screenshot") ? fileUrl : "",
@@ -338,8 +343,9 @@ export default function LeadDetailPage() {
         date_sent: revForm.type === "Revised Itinerary" ? new Date().toISOString() : null,
         lead_id: id!,
         created_by: user.id,
-      });
+      }).select();
       if (revErr) throw revErr;
+      if (!inserted || inserted.length === 0) throw new Error("Permission denied: your account cannot submit revisions. Please contact admin.");
 
       await supabase.from("leads").update({ last_activity_at: new Date().toISOString() }).eq("id", id!);
 
@@ -347,11 +353,13 @@ export default function LeadDetailPage() {
         : revForm.type === "Call Recording" ? "Call recording uploaded"
           : `Revised itinerary uploaded`;
 
-      await supabase.from("activity_logs").insert({
-        lead_id: id!, user_id: user.id,
-        action: `Added Revision ${nextNum} — ${revForm.type}`,
-        details: `${details}${revForm.notes ? `. Notes: ${revForm.notes}` : ""}`,
-      });
+      try {
+        await supabase.from("activity_logs").insert({
+          lead_id: id!, user_id: user.id,
+          action: `Added Revision ${nextNum} — ${revForm.type}`,
+          details: `${details}${revForm.notes ? `. Notes: ${revForm.notes}` : ""}`,
+        });
+      } catch { /* non-fatal */ }
     },
     onSuccess: () => {
       setRevSubmitError(null);
@@ -376,25 +384,31 @@ export default function LeadDetailPage() {
     mutationFn: async () => {
       if (!user || !taskForm.followUpDate) throw new Error("Missing required fields");
       if (isAdmin && !taskForm.assignedTo) throw new Error("Please select an employee to assign this task to");
+
       const assignedTo = taskForm.assignedTo || user.id;
       const taskDescription = taskForm.notes.trim() || `Task for ${lead?.name ?? "lead"}`;
 
-      const { error } = await supabase.from("tasks").insert({
+      const { data: inserted, error } = await supabase.from("tasks").insert({
         description: taskDescription, follow_up_date: taskForm.followUpDate.toISOString(),
         notes: taskForm.notes || null, lead_id: id!, assigned_employee_id: assignedTo, created_by: user.id,
-      });
+      }).select();
       if (error) throw error;
+      if (!inserted || inserted.length === 0) throw new Error("Permission denied: your account cannot create tasks. Please contact admin.");
 
-      await supabase.from("activity_logs").insert({
-        lead_id: id!, user_id: user.id, action: "Created task", details: taskDescription,
-      });
+      try {
+        await supabase.from("activity_logs").insert({
+          lead_id: id!, user_id: user.id, action: "Created task", details: taskDescription,
+        });
+      } catch { /* non-fatal */ }
 
       if (assignedTo !== user.id) {
-        await sendNotification({
-          recipientId: assignedTo, type: "task_assigned",
-          message: `New task for "${lead?.name ?? ""}" (${lead?.client_id ?? id}): ${taskForm.notes || taskDescription}`,
-          leadId: id, isTask: true,
-        });
+        try {
+          await sendNotification({
+            recipientId: assignedTo, type: "task_assigned",
+            message: `New task for "${lead?.name ?? ""}" (${lead?.client_id ?? id}): ${taskForm.notes || taskDescription}`,
+            leadId: id, isTask: true,
+          });
+        } catch { /* non-fatal */ }
       }
     },
     onSuccess: () => {
@@ -412,11 +426,11 @@ export default function LeadDetailPage() {
     },
   });
 
-  // Task Proof Submit
+  // Task Proof Submit — upload already done by handleProofUpload on file select
   const submitTaskProof = useMutation({
     mutationFn: async () => {
-      if (!proofFile || !proofTaskId || !user) throw new Error("No file selected");
-      const url = await uploadToR2(proofFile, "task-proofs", setProofProgress);
+      const url = proofUrlRef.current;
+      if (!url || !proofTaskId || !user) throw new Error("File not ready yet, please wait.");
       const { error } = await supabase.from("tasks").update({
         proof_url: url,
         proof_submitted: true,
@@ -424,13 +438,16 @@ export default function LeadDetailPage() {
         completed_at: new Date().toISOString(),
       }).eq("id", proofTaskId);
       if (error) throw error;
-      await supabase.from("activity_logs").insert({
-        lead_id: id!, user_id: user.id, action: "Task proof uploaded",
-        details: url,
-      });
+      try {
+        await supabase.from("activity_logs").insert({
+          lead_id: id!, user_id: user.id, action: "Task proof uploaded",
+          details: url,
+        });
+      } catch { /* non-fatal */ }
     },
     onSuccess: () => {
       toast({ title: "Proof submitted", description: "Task marked as completed." });
+      proofUrlRef.current = null;
       setProofTaskId(null); setProofFile(null); setProofUploaded(false); setProofUrl(null); setProofProgress(0);
       queryClient.invalidateQueries({ queryKey: ["lead-tasks", id] });
       queryClient.invalidateQueries({ queryKey: ["activities", id] });
@@ -503,6 +520,21 @@ export default function LeadDetailPage() {
       setItineraryFile(null);
     }
     setItineraryUploading(false);
+  };
+
+  const handleProofUpload = async (file: File) => {
+    setProofUploading(true);
+    setProofProgress(0);
+    try {
+      const url = await uploadFile(file, "task-proofs", setProofProgress);
+      proofUrlRef.current = url;
+      setProofUrl(url);
+      setProofUploaded(true);
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+      setProofFile(null);
+    }
+    setProofUploading(false);
   };
 
   const handleRevFileUpload = async (file: File, type: string) => {
@@ -887,8 +919,16 @@ export default function LeadDetailPage() {
                     accept="image/*,.pdf,.doc,.docx"
                     label="Proof File *"
                     file={proofFile}
-                    onSelect={(f) => { setProofFile(f); setProofUploaded(false); setProofUrl(null); setProofProgress(0); }}
-                    onRemove={() => { setProofFile(null); setProofUploaded(false); setProofUrl(null); setProofProgress(0); }}
+                    onSelect={(f) => {
+                      if (!f) return;
+                      setProofFile(f);
+                      setProofUploaded(false);
+                      setProofUrl(null);
+                      setProofProgress(0);
+                      proofUrlRef.current = null;
+                      handleProofUpload(f);
+                    }}
+                    onRemove={() => { setProofFile(null); setProofUploaded(false); setProofUrl(null); setProofProgress(0); proofUrlRef.current = null; }}
                     uploading={proofUploading}
                     progress={proofProgress}
                     uploaded={proofUploaded}
@@ -896,7 +936,7 @@ export default function LeadDetailPage() {
                   <Button
                     size="sm"
                     onClick={() => submitTaskProof.mutate()}
-                    disabled={!proofFile || submitTaskProof.isPending}
+                    disabled={!proofUploaded || submitTaskProof.isPending}
                   >
                     {submitTaskProof.isPending ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Submitting...</> : "Submit Proof"}
                   </Button>
