@@ -26,14 +26,18 @@ export default function EmployeeTasksPage() {
   const [proofUploading, setProofUploading] = useState(false);
   const [proofProgress, setProofProgress] = useState(0);
   const [proofUrl, setProofUrl] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const proofUrlRef = useRef<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-upload as soon as a file is selected — no separate "Upload File" step needed
   const handleAutoUpload = async (f: File) => {
     setProofUploading(true);
     setProofProgress(0);
+    setSubmitError(null);
     try {
       const url = await uploadToR2(f, "task-proofs", setProofProgress);
+      proofUrlRef.current = url;
       setProofUrl(url);
       setProofUploaded(true);
     } catch (err: any) {
@@ -50,6 +54,8 @@ export default function EmployeeTasksPage() {
     setProofUploading(false);
     setProofProgress(0);
     setProofUrl(null);
+    setSubmitError(null);
+    proofUrlRef.current = null;
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -92,7 +98,9 @@ export default function EmployeeTasksPage() {
       queryClient.invalidateQueries({ queryKey: ["my-tasks", user?.id] });
     },
     onError: (err: any) => {
-      toast({ title: "Error submitting proof", description: err.message, variant: "destructive" });
+      const msg = err?.message ?? "Submission failed. Please try again.";
+      setSubmitError(msg);
+      toast({ title: "Error submitting proof", description: msg, variant: "destructive" });
       queryClient.invalidateQueries({ queryKey: ["my-tasks", user?.id] });
     },
   });
@@ -299,20 +307,25 @@ export default function EmployeeTasksPage() {
               )}
             </div>
 
-            <Button
-              className="w-full"
-              disabled={!proofUploaded || !proofUrl || submitProof.isPending}
-              onClick={() => {
-                const task = tasks.find((t) => t.id === proofTaskId);
-                if (!proofTaskId || !proofUrl || !task) {
-                  toast({ title: "Please wait for the file to finish uploading", variant: "destructive" });
-                  return;
-                }
-                submitProof.mutate({ taskId: proofTaskId, url: proofUrl, leadId: task.lead_id });
-              }}
-            >
-              {submitProof.isPending ? "Submitting..." : "Submit Proof & Complete Task"}
-            </Button>
+            <div className="space-y-2">
+              <Button
+                className="w-full"
+                disabled={!proofUploaded || submitProof.isPending}
+                onClick={() => {
+                  const url = proofUrlRef.current;
+                  const task = tasks.find((t) => t.id === proofTaskId);
+                  if (!proofTaskId || !url || !task) {
+                    setSubmitError("File not ready yet, please wait.");
+                    return;
+                  }
+                  setSubmitError(null);
+                  submitProof.mutate({ taskId: proofTaskId, url, leadId: task.lead_id });
+                }}
+              >
+                {submitProof.isPending ? "Submitting..." : "Submit Proof & Complete Task"}
+              </Button>
+              {submitError && <p className="text-sm text-destructive text-center">{submitError}</p>}
+            </div>
           </div>
         </DialogContent>
       </Dialog>

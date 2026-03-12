@@ -151,6 +151,16 @@ export default function LeadDetailPage() {
   const [proofUploaded, setProofUploaded] = useState(false);
   const [proofUrl, setProofUrl] = useState<string | null>(null);
 
+  // Refs so submit handlers always read the latest uploaded URL
+  // (avoids React stale-closure issues on mobile)
+  const itineraryUrlRef = useRef<string | null>(null);
+  const revFileUrlRef = useRef<string | null>(null);
+
+  // Inline submission error states (toasts can be missed on mobile)
+  const [itinerarySubmitError, setItinerarySubmitError] = useState<string | null>(null);
+  const [revSubmitError, setRevSubmitError] = useState<string | null>(null);
+  const [taskSubmitError, setTaskSubmitError] = useState<string | null>(null);
+
   // Edit mode state
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
   const [isSavingPersonal, setIsSavingPersonal] = useState(false);
@@ -256,14 +266,14 @@ export default function LeadDetailPage() {
 
   // Itinerary Submit
   const submitItinerary = useMutation({
-    mutationFn: async () => {
-      if (!itineraryUrl || !user) throw new Error("Upload file first");
+    mutationFn: async ({ url }: { url: string }) => {
+      if (!url || !user) throw new Error("Upload file first");
 
       const nextNum = revisions.length + 1;
       const { error: revErr } = await supabase.from("revisions").insert({
         revision_number: nextNum,
         call_recording_url: "",
-        itinerary_link: itineraryUrl,
+        itinerary_link: url,
         notes: "Initial itinerary submitted",
         send_status: "Sent",
         date_sent: new Date().toISOString(),
@@ -278,8 +288,7 @@ export default function LeadDetailPage() {
         if (match) {
           extractedCode = match[1].toUpperCase();
         } else {
-          // fallback to the first part of filename before space/dash/dot if possible
-          extractedCode = itineraryFile.name.split(/[\s\.\_]/)[0].toUpperCase();
+          extractedCode = itineraryFile.name.split(/[\s._]/)[0].toUpperCase();
         }
       }
 
@@ -292,11 +301,13 @@ export default function LeadDetailPage() {
 
       await supabase.from("activity_logs").insert({
         lead_id: id!, user_id: user.id, action: "Submitted itinerary",
-        details: itineraryUrl ?? itineraryFile?.name ?? "",
+        details: url,
       });
     },
     onSuccess: () => {
+      setItinerarySubmitError(null);
       toast({ title: "Itinerary submitted", description: "Lead status updated to On Progress" });
+      itineraryUrlRef.current = null;
       setItineraryFile(null); setItineraryUploaded(false); setItineraryUrl(null); setItineraryProgress(0);
       queryClient.invalidateQueries({ queryKey: ["lead", id] });
       queryClient.invalidateQueries({ queryKey: ["revisions", id] });
@@ -304,22 +315,24 @@ export default function LeadDetailPage() {
     },
     onError: (err: any) => {
       console.error("Submit itinerary error:", err);
-      toast({ title: "Error submitting itinerary", description: err.message, variant: "destructive" });
+      const msg = err?.message ?? "Submission failed. Please try again.";
+      setItinerarySubmitError(msg);
+      toast({ title: "Error submitting itinerary", description: msg, variant: "destructive" });
     },
   });
 
   // Revision Submit
   const addRevision = useMutation({
-    mutationFn: async () => {
+    mutationFn: async ({ url }: { url: string }) => {
       if (!user || !revForm.type) throw new Error("Select type");
 
-      let fileUrl = revFileUrl;
+      const fileUrl = url;
       const nextNum = revisions.length + 1;
 
       const { error: revErr } = await supabase.from("revisions").insert({
         revision_number: nextNum,
-        call_recording_url: revForm.type === "Call Recording" ? (fileUrl ?? "") : "",
-        itinerary_link: (revForm.type === "Revised Itinerary" || revForm.type === "Chat Screenshot") ? (fileUrl ?? "") : "",
+        call_recording_url: revForm.type === "Call Recording" ? fileUrl : "",
+        itinerary_link: (revForm.type === "Revised Itinerary" || revForm.type === "Chat Screenshot") ? fileUrl : "",
         notes: `[${revForm.type}] ${revForm.notes}`,
         send_status: revForm.type === "Revised Itinerary" ? "Sent" : "Pending",
         date_sent: revForm.type === "Revised Itinerary" ? new Date().toISOString() : null,
@@ -341,8 +354,10 @@ export default function LeadDetailPage() {
       });
     },
     onSuccess: () => {
+      setRevSubmitError(null);
       toast({ title: "Revision submitted successfully", description: `${revForm.type} has been recorded.` });
       setRevForm({ type: "", notes: "", itineraryLink: "" });
+      revFileUrlRef.current = null;
       setRevFile(null); setRevUploaded(false); setRevFileUrl(null); setRevProgress(0);
       queryClient.invalidateQueries({ queryKey: ["revisions", id] });
       queryClient.invalidateQueries({ queryKey: ["lead", id] });
@@ -350,7 +365,9 @@ export default function LeadDetailPage() {
     },
     onError: (err: any) => {
       console.error("Add revision error:", err);
-      toast({ title: "Error adding revision", description: err.message, variant: "destructive" });
+      const msg = err?.message ?? "Failed to submit revision. Please try again.";
+      setRevSubmitError(msg);
+      toast({ title: "Error adding revision", description: msg, variant: "destructive" });
     },
   });
 
@@ -381,6 +398,7 @@ export default function LeadDetailPage() {
       }
     },
     onSuccess: () => {
+      setTaskSubmitError(null);
       toast({ title: "Task created" });
       setTaskForm({ followUpDate: undefined, notes: "", assignedTo: "" });
       queryClient.invalidateQueries({ queryKey: ["lead-tasks", id] });
@@ -388,7 +406,9 @@ export default function LeadDetailPage() {
     },
     onError: (err: any) => {
       console.error("Create task error:", err);
-      toast({ title: "Error creating task", description: err.message, variant: "destructive" });
+      const msg = err?.message ?? "Failed to create task. Please try again.";
+      setTaskSubmitError(msg);
+      toast({ title: "Error creating task", description: msg, variant: "destructive" });
     },
   });
 
@@ -472,8 +492,10 @@ export default function LeadDetailPage() {
   const handleItineraryUpload = async (file: File) => {
     setItineraryUploading(true);
     setItineraryProgress(0);
+    setItinerarySubmitError(null);
     try {
       const url = await uploadFile(file, "itineraries", setItineraryProgress);
+      itineraryUrlRef.current = url;   // ref always has the latest URL
       setItineraryUrl(url);
       setItineraryUploaded(true);
     } catch (err: any) {
@@ -487,8 +509,10 @@ export default function LeadDetailPage() {
     const folder = type === "Call Recording" ? "recordings" : type === "Revised Itinerary" ? "itineraries" : "revisions";
     setRevUploading(true);
     setRevProgress(0);
+    setRevSubmitError(null);
     try {
       const url = await uploadFile(file, folder, setRevProgress);
+      revFileUrlRef.current = url;     // ref always has the latest URL
       setRevFileUrl(url);
       setRevUploaded(true);
     } catch (err: any) {
@@ -698,9 +722,20 @@ export default function LeadDetailPage() {
               />
 
               {itineraryUploaded && (
-                <Button onClick={() => submitItinerary.mutate()} disabled={submitItinerary.isPending}>
-                  <Upload className="h-4 w-4 mr-1" /> Submit Itinerary
-                </Button>
+                <div className="space-y-2">
+                  <Button
+                    onClick={() => {
+                      const url = itineraryUrlRef.current;
+                      if (!url) { setItinerarySubmitError("File not ready yet, please wait."); return; }
+                      setItinerarySubmitError(null);
+                      submitItinerary.mutate({ url });
+                    }}
+                    disabled={submitItinerary.isPending}
+                  >
+                    {submitItinerary.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Submitting...</> : <><Upload className="h-4 w-4 mr-1" /> Submit Itinerary</>}
+                  </Button>
+                  {itinerarySubmitError && <p className="text-sm text-destructive">{itinerarySubmitError}</p>}
+                </div>
               )}
             </>
           )}
@@ -792,9 +827,20 @@ export default function LeadDetailPage() {
               <div><Label>Notes <span className="text-muted-foreground font-normal">(optional)</span></Label><Textarea value={revForm.notes} onChange={(e) => setRevForm({ ...revForm, notes: e.target.value })} placeholder="Describe the revision..." /></div>
             )}
 
-            <Button onClick={() => addRevision.mutate()} disabled={!canSubmitRevision || addRevision.isPending}>
-              Submit Revision
-            </Button>
+            <div className="space-y-2">
+              <Button
+                onClick={() => {
+                  const url = revFileUrlRef.current;
+                  if (!url) { setRevSubmitError("File not ready yet, please wait."); return; }
+                  setRevSubmitError(null);
+                  addRevision.mutate({ url });
+                }}
+                disabled={!canSubmitRevision || addRevision.isPending}
+              >
+                {addRevision.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Submitting...</> : "Submit Revision"}
+              </Button>
+              {revSubmitError && <p className="text-sm text-destructive">{revSubmitError}</p>}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -907,12 +953,15 @@ export default function LeadDetailPage() {
               />
             </div>
           </div>
-          <Button
-            onClick={() => createTask.mutate()}
-            disabled={!taskForm.followUpDate || (isAdmin && !taskForm.assignedTo) || createTask.isPending}
-          >
-            Add Task
-          </Button>
+          <div className="space-y-2">
+            <Button
+              onClick={() => { setTaskSubmitError(null); createTask.mutate(); }}
+              disabled={!taskForm.followUpDate || (isAdmin && !taskForm.assignedTo) || createTask.isPending}
+            >
+              {createTask.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Adding...</> : "Add Task"}
+            </Button>
+            {taskSubmitError && <p className="text-sm text-destructive">{taskSubmitError}</p>}
+          </div>
         </CardContent>
       </Card>
 
