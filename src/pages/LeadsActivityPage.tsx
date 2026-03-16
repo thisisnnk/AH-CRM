@@ -16,6 +16,7 @@ const isRelevantAction = (action: string) =>
   action === "Submitted itinerary" ||
   action === "Created task" ||
   action === "Task proof uploaded" ||
+  action === "Note created" ||
   action.startsWith("Added Revision") ||
   action.startsWith("Changed status to");
 

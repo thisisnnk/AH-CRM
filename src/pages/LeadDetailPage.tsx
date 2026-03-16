@@ -218,8 +218,8 @@ export default function LeadDetailPage() {
   const { data: leadNotes = [] } = useQuery({
     queryKey: ["lead-notes", id],
     queryFn: async () => {
-      const { data } = await supabase.from("lead_notes").select("*").eq("lead_id", id!).order("created_at", { ascending: false });
-      return data ?? [];
+      const { data } = await (supabase as any).from("lead_notes").select("*").eq("lead_id", id!).order("created_at", { ascending: false });
+      return (data ?? []) as any[];
     },
     enabled: !!id,
   });
@@ -398,6 +398,8 @@ export default function LeadDetailPage() {
 
       const assignedTo = taskForm.assignedTo || user.id;
       const taskDescription = taskForm.notes.trim() || `Task for ${lead?.name ?? "lead"}`;
+      const senderName = employees.find((e) => e.user_id === user.id)?.name ?? "Someone";
+      const receiverName = employees.find((e) => e.user_id === assignedTo)?.name ?? "a user";
 
       const { data: inserted, error } = await supabase.from("tasks").insert({
         description: taskDescription, follow_up_date: taskForm.followUpDate.toISOString(),
@@ -408,7 +410,8 @@ export default function LeadDetailPage() {
 
       try {
         await supabase.from("activity_logs").insert({
-          lead_id: id!, user_id: user.id, action: "Created task", details: taskDescription,
+          lead_id: id!, user_id: user.id, action: "Created task",
+          details: `${senderName} created a task for ${receiverName}`,
         });
       } catch { /* non-fatal */ }
 
@@ -506,7 +509,7 @@ export default function LeadDetailPage() {
 
   const deleteNote = useMutation({
     mutationFn: async (noteId: string) => {
-      const { error, count } = await supabase
+      const { error, count } = await (supabase as any)
         .from("lead_notes")
         .delete({ count: "exact" })
         .eq("id", noteId);
@@ -523,7 +526,9 @@ export default function LeadDetailPage() {
   const createNote = useMutation({
     mutationFn: async () => {
       if (!user || !noteForm.note_to_user || !noteForm.note_message.trim()) throw new Error("Fill all required fields");
-      const { error } = await supabase.from("lead_notes").insert({
+
+      // Step 1 — Insert note
+      const { error } = await (supabase as any).from("lead_notes").insert({
         lead_id: id!,
         client_id: lead?.client_id ?? null,
         lead_name: lead?.name ?? null,
@@ -532,6 +537,32 @@ export default function LeadDetailPage() {
         created_by: user.id,
       });
       if (error) throw error;
+
+      // Resolve names for notification and activity log
+      const senderName = employees.find((e) => e.user_id === user.id)?.name ?? "Someone";
+      const receiverName = employees.find((e) => e.user_id === noteForm.note_to_user)?.name ?? "a user";
+      const leadName = lead?.name ?? "";
+
+      // Step 2 — Send notification to the recipient
+      try {
+        await sendNotification({
+          recipientId: noteForm.note_to_user,
+          type: "note_assigned",
+          message: `New note from ${senderName} for Lead "${leadName}"`,
+          leadId: id,
+        });
+      } catch { /* non-fatal */ }
+
+      // Step 3 — Log activity
+      try {
+        await supabase.from("activity_logs").insert({
+          lead_id: id!,
+          user_id: user.id,
+          action: "Note created",
+          details: `${senderName} sent a note to ${receiverName}`,
+        });
+      } catch { /* non-fatal */ }
+
       await supabase.from("leads").update({ last_activity_at: new Date().toISOString() }).eq("id", id!);
     },
     onSuccess: () => {
@@ -567,7 +598,7 @@ export default function LeadDetailPage() {
   };
 
   const startEditLeadInfo = () => {
-    setLeadInfoForm({ lead_source: lead.lead_source || "", status: lead.status || "Open", itinerary_code: lead.itinerary_code || "", destination: lead.destination || "", travelers: String(lead.travelers || ""), trip_duration: lead.trip_duration || "", tour_category: lead.tour_category || "", travel_date: lead.travel_date || "", budget: lead.budget || "" });
+    setLeadInfoForm({ lead_source: lead.lead_source || "", status: lead.status || "Open", itinerary_code: lead.itinerary_code || "", destination: lead.destination || "", travelers: String(lead.travelers || ""), trip_duration: lead.trip_duration || "", tour_category: lead.tour_category || "", travel_date: (lead as any).travel_date || "", budget: (lead as any).budget || "" });
     setIsEditingLeadInfo(true);
   };
   const saveLeadInfo = () => {
@@ -807,13 +838,13 @@ export default function LeadDetailPage() {
             <Label className="text-muted-foreground text-xs">Travel Date</Label>
             {isEditingLeadInfo
               ? <Input type="date" value={leadInfoForm.travel_date} onChange={(e) => setLeadInfoForm({ ...leadInfoForm, travel_date: e.target.value })} className="h-8 mt-1" />
-              : <p className="mt-1 text-sm">{lead.travel_date ? format(new Date(lead.travel_date), "MMM d, yyyy") : "—"}</p>}
+              : <p className="mt-1 text-sm">{(lead as any).travel_date ? format(new Date((lead as any).travel_date), "MMM d, yyyy") : "—"}</p>}
           </div>
           <div>
             <Label className="text-muted-foreground text-xs">Budget</Label>
             {isEditingLeadInfo
               ? <Input value={leadInfoForm.budget} onChange={(e) => setLeadInfoForm({ ...leadInfoForm, budget: e.target.value })} className="h-8 mt-1" placeholder="e.g. ₹50,000" />
-              : <p className="mt-1 text-sm">{lead.budget || "—"}</p>}
+              : <p className="mt-1 text-sm">{(lead as any).budget || "—"}</p>}
           </div>
         </CardContent>
       </Card>
@@ -989,13 +1020,24 @@ export default function LeadDetailPage() {
 
       {/* Notes & Tasks Tabs */}
       <Card>
-        <CardHeader><CardTitle>Notes & Tasks</CardTitle></CardHeader>
-        <CardContent>
-          <Tabs defaultValue="tasks">
-            <TabsList className="mb-4">
-              <TabsTrigger value="notes">Notes</TabsTrigger>
-              <TabsTrigger value="tasks">Tasks</TabsTrigger>
+        <Tabs defaultValue="tasks">
+          <CardHeader>
+            <TabsList className="flex justify-center bg-transparent p-0 h-auto gap-8 w-full">
+              <TabsTrigger
+                value="notes"
+                className="text-lg font-semibold px-0 py-1 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none text-muted-foreground data-[state=active]:text-foreground"
+              >
+                Notes
+              </TabsTrigger>
+              <TabsTrigger
+                value="tasks"
+                className="text-lg font-semibold px-0 py-1 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none text-muted-foreground data-[state=active]:text-foreground"
+              >
+                Tasks
+              </TabsTrigger>
             </TabsList>
+          </CardHeader>
+          <CardContent>
 
             {/* ── NOTES TAB ── */}
             <TabsContent value="notes" className="space-y-4">
@@ -1038,13 +1080,17 @@ export default function LeadDetailPage() {
                 <p className="text-sm text-muted-foreground">No notes yet</p>
               ) : (
                 <div className="space-y-3">
-                  {leadNotes.map((n) => (
+                  {leadNotes.map((n: any) => (
                     <div key={n.id} className="p-3 rounded-lg border bg-muted/20">
                       <div className="flex justify-between items-start gap-2">
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs text-muted-foreground">To: {employees.find((e) => e.user_id === n.note_to_user)?.name ?? n.note_to_user}</p>
-                          <p className="text-sm mt-1">{n.note_message}</p>
-                          <p className="text-xs text-muted-foreground mt-1">{format(new Date(n.created_at!), "MMM d, yyyy HH:mm")}</p>
+                          <p className="text-sm font-medium">{n.note_message}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            From: <span className="font-medium">{employees.find((e) => e.user_id === n.created_by)?.name ?? "Unknown"}</span>
+                            {" · "}
+                            To: <span className="font-medium">{employees.find((e) => e.user_id === n.note_to_user)?.name ?? "Unknown"}</span>
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{format(new Date(n.created_at), "MMM d, yyyy HH:mm")}</p>
                         </div>
                         {canDelete && (
                           <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 shrink-0"
@@ -1061,134 +1107,137 @@ export default function LeadDetailPage() {
 
             {/* ── TASKS TAB ── */}
             <TabsContent value="tasks" className="space-y-4">
-          {tasks.map((t) => (
-            <div key={t.id} className={cn("p-3 rounded-lg border", t.status === "Completed" ? "bg-success/5" : new Date(t.follow_up_date) < new Date() ? "border-destructive/50 bg-destructive/5" : "")}>
-              <div className="flex justify-between items-start gap-2">
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-muted-foreground">{format(new Date(t.follow_up_date), "MMM d, yyyy")} · {t.status}</p>
-                  {t.notes && <p className="text-sm mt-1">{t.notes}</p>}
+              {/* Add Task Form — shown first */}
+              <p className="font-medium text-sm">Add Task</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <Label>Client ID</Label>
+                  <Input value={lead.client_id ?? ""} readOnly className="bg-muted/40 cursor-default" placeholder="—" />
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {t.proof_submitted && (
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-success/10 text-success font-medium whitespace-nowrap">Proof Submitted</span>
-                  )}
-                  {t.proof_url && (
-                    <a href={t.proof_url} target="_blank" rel="noopener" className="text-xs text-primary hover:underline whitespace-nowrap">View Proof</a>
-                  )}
-                  {!t.proof_submitted && t.status !== "Completed" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      onClick={() => {
-                        setProofTaskId(proofTaskId === t.id ? null : t.id);
-                        setProofFile(null); setProofUploaded(false); setProofUrl(null); setProofProgress(0);
-                      }}
-                    >
-                      <Upload className="h-3 w-3 mr-1" />
-                      {proofTaskId === t.id ? "Cancel" : "Upload Proof"}
-                    </Button>
-                  )}
-                  {canDelete && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                      onClick={() => { if (confirm("Delete this task?")) deleteTask.mutate(t.id); }}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
+                <div>
+                  <Label>Name</Label>
+                  <Input value={lead.name ?? ""} readOnly className="bg-muted/40 cursor-default" />
                 </div>
+                <div>
+                  <Label>Follow Up Date *</Label>
+                  <Input
+                    type="date"
+                    min={format(new Date(), "yyyy-MM-dd")}
+                    value={taskForm.followUpDate ? format(taskForm.followUpDate, "yyyy-MM-dd") : ""}
+                    onChange={(e) => {
+                      const d = e.target.value ? new Date(e.target.value + "T00:00:00") : undefined;
+                      setTaskForm({ ...taskForm, followUpDate: d });
+                    }}
+                    className="w-full"
+                  />
+                </div>
+                {isAdmin && (
+                  <div>
+                    <Label>Assign To <span className="text-destructive">*</span></Label>
+                    <Select value={taskForm.assignedTo} onValueChange={(v) => setTaskForm({ ...taskForm, assignedTo: v })}>
+                      <SelectTrigger className={!taskForm.assignedTo ? "border-amber-400" : ""}><SelectValue placeholder="Select employee to assign" /></SelectTrigger>
+                      <SelectContent>
+                        {employees.length === 0 && <SelectItem value="_none" disabled>No active employees found</SelectItem>}
+                        {employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    {!taskForm.assignedTo && <p className="text-xs text-amber-600 mt-1">Please select an employee to assign this task to.</p>}
+                  </div>
+                )}
+                <div className="col-span-1 md:col-span-2">
+                  <Label>Notes</Label>
+                  <Textarea
+                    value={taskForm.notes}
+                    onChange={(e) => setTaskForm({ ...taskForm, notes: e.target.value })}
+                    placeholder="Describe what needs to be done..."
+                    className="min-h-[120px] resize-y"
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Button
+                  onClick={() => { setTaskSubmitError(null); createTask.mutate(); }}
+                  disabled={!taskForm.followUpDate || (isAdmin && !taskForm.assignedTo) || createTask.isPending}
+                >
+                  {createTask.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Adding...</> : "Add Task"}
+                </Button>
+                {taskSubmitError && <p className="text-sm text-destructive">{taskSubmitError}</p>}
               </div>
 
-              {/* Inline proof upload panel */}
-              {proofTaskId === t.id && (
-                <div className="mt-3 pt-3 border-t space-y-3">
-                  <FileUploadWidget
-                    accept="image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    label="Proof File *"
-                    file={proofFile}
-                    onSelect={(f) => {
-                      if (!f) return;
-                      setProofFile(f);
-                      setProofUploaded(false);
-                      setProofUrl(null);
-                      setProofProgress(0);
-                      proofUrlRef.current = null;
-                      handleProofUpload(f);
-                    }}
-                    onRemove={() => { setProofFile(null); setProofUploaded(false); setProofUrl(null); setProofProgress(0); proofUrlRef.current = null; }}
-                    uploading={proofUploading}
-                    progress={proofProgress}
-                    uploaded={proofUploaded}
-                  />
-                  <Button
-                    size="sm"
-                    onClick={() => submitTaskProof.mutate()}
-                    disabled={!proofUploaded || submitTaskProof.isPending}
-                  >
-                    {submitTaskProof.isPending ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Submitting...</> : "Submit Proof"}
-                  </Button>
+              {/* Task List — shown below the form */}
+              {tasks.length > 0 && <Separator />}
+              {tasks.map((t) => (
+                <div key={t.id} className={cn("p-3 rounded-lg border", t.status === "Completed" ? "bg-success/5" : new Date(t.follow_up_date) < new Date() ? "border-destructive/50 bg-destructive/5" : "")}>
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-muted-foreground">{format(new Date(t.follow_up_date), "MMM d, yyyy")} · {t.status}</p>
+                      {t.notes && <p className="text-sm mt-1">{t.notes}</p>}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {t.proof_submitted && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-success/10 text-success font-medium whitespace-nowrap">Proof Submitted</span>
+                      )}
+                      {t.proof_url && (
+                        <a href={t.proof_url} target="_blank" rel="noopener" className="text-xs text-primary hover:underline whitespace-nowrap">View Proof</a>
+                      )}
+                      {!t.proof_submitted && t.status !== "Completed" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => {
+                            setProofTaskId(proofTaskId === t.id ? null : t.id);
+                            setProofFile(null); setProofUploaded(false); setProofUrl(null); setProofProgress(0);
+                          }}
+                        >
+                          <Upload className="h-3 w-3 mr-1" />
+                          {proofTaskId === t.id ? "Cancel" : "Upload Proof"}
+                        </Button>
+                      )}
+                      {canDelete && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                          onClick={() => { if (confirm("Delete this task?")) deleteTask.mutate(t.id); }}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Inline proof upload panel */}
+                  {proofTaskId === t.id && (
+                    <div className="mt-3 pt-3 border-t space-y-3">
+                      <FileUploadWidget
+                        accept="image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        label="Proof File *"
+                        file={proofFile}
+                        onSelect={(f) => {
+                          if (!f) return;
+                          setProofFile(f);
+                          setProofUploaded(false);
+                          setProofUrl(null);
+                          setProofProgress(0);
+                          proofUrlRef.current = null;
+                          handleProofUpload(f);
+                        }}
+                        onRemove={() => { setProofFile(null); setProofUploaded(false); setProofUrl(null); setProofProgress(0); proofUrlRef.current = null; }}
+                        uploading={proofUploading}
+                        progress={proofProgress}
+                        uploaded={proofUploaded}
+                      />
+                      <Button
+                        size="sm"
+                        onClick={() => submitTaskProof.mutate()}
+                        disabled={!proofUploaded || submitTaskProof.isPending}
+                      >
+                        {submitTaskProof.isPending ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Submitting...</> : "Submit Proof"}
+                      </Button>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          ))}
-          <Separator />
-          <p className="font-medium text-sm">Add Task</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <Label>Client ID</Label>
-              <Input value={lead.client_id ?? ""} readOnly className="bg-muted/40 cursor-default" placeholder="—" />
-            </div>
-            <div>
-              <Label>Name</Label>
-              <Input value={lead.name ?? ""} readOnly className="bg-muted/40 cursor-default" />
-            </div>
-            <div>
-              <Label>Follow Up Date *</Label>
-              <Input
-                type="date"
-                min={format(new Date(), "yyyy-MM-dd")}
-                value={taskForm.followUpDate ? format(taskForm.followUpDate, "yyyy-MM-dd") : ""}
-                onChange={(e) => {
-                  const d = e.target.value ? new Date(e.target.value + "T00:00:00") : undefined;
-                  setTaskForm({ ...taskForm, followUpDate: d });
-                }}
-                className="w-full"
-              />
-            </div>
-            {isAdmin && (
-              <div>
-                <Label>Assign To <span className="text-destructive">*</span></Label>
-                <Select value={taskForm.assignedTo} onValueChange={(v) => setTaskForm({ ...taskForm, assignedTo: v })}>
-                  <SelectTrigger className={!taskForm.assignedTo ? "border-amber-400" : ""}><SelectValue placeholder="Select employee to assign" /></SelectTrigger>
-                  <SelectContent>
-                    {employees.length === 0 && <SelectItem value="_none" disabled>No active employees found</SelectItem>}
-                    {employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                {!taskForm.assignedTo && <p className="text-xs text-amber-600 mt-1">Please select an employee to assign this task to.</p>}
-              </div>
-            )}
-            <div className="col-span-1 md:col-span-2">
-              <Label>Notes</Label>
-              <Textarea
-                value={taskForm.notes}
-                onChange={(e) => setTaskForm({ ...taskForm, notes: e.target.value })}
-                placeholder="Describe what needs to be done..."
-                className="min-h-[120px] resize-y"
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Button
-              onClick={() => { setTaskSubmitError(null); createTask.mutate(); }}
-              disabled={!taskForm.followUpDate || (isAdmin && !taskForm.assignedTo) || createTask.isPending}
-            >
-              {createTask.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Adding...</> : "Add Task"}
-            </Button>
-            {taskSubmitError && <p className="text-sm text-destructive">{taskSubmitError}</p>}
-          </div>
+              ))}
             </TabsContent>
-          </Tabs>
-        </CardContent>
+          </CardContent>
+        </Tabs>
       </Card>
 
       {/* Activity Log */}
@@ -1200,6 +1249,7 @@ export default function LeadDetailPage() {
               a.action === "Submitted itinerary" ||
               a.action === "Created task" ||
               a.action === "Task proof uploaded" ||
+              a.action === "Note created" ||
               (a.action ?? "").startsWith("Added Revision") ||
               (a.action ?? "").startsWith("Changed status to")
             );
