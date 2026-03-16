@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -42,6 +43,47 @@ export default function NotificationsPage() {
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
   });
+
+  // Feature 4: Check for leads with no activity in the last 24 hours
+  useEffect(() => {
+    if (!user) return;
+    const checkStaleLeads = async () => {
+      const threshold = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: staleLeads } = await supabase
+        .from("leads")
+        .select("id, name, last_activity_at")
+        .eq("assigned_employee_id", user.id)
+        .not("status", "in", '("Converted","Lost")')
+        .or(`last_activity_at.lt.${threshold},last_activity_at.is.null`);
+
+      if (!staleLeads || staleLeads.length === 0) return;
+
+      for (const lead of staleLeads) {
+        // Skip if a reminder was already sent for this lead in the last 24h
+        const { data: existing } = await supabase
+          .from("notifications")
+          .select("id")
+          .eq("recipient_id", user.id)
+          .eq("lead_id", lead.id)
+          .eq("type", "inactivity_reminder")
+          .gte("created_at", threshold)
+          .limit(1);
+
+        if (existing && existing.length > 0) continue;
+
+        await supabase.from("notifications").insert({
+          recipient_id: user.id,
+          lead_id: lead.id,
+          type: "inactivity_reminder",
+          message: `No activity on Lead "${lead.name}" for the last 24 hours.`,
+          is_read: false,
+          is_dismissed: false,
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["notifications", user.id] });
+    };
+    checkStaleLeads();
+  }, [user?.id]);
 
   const unread = notifications.filter((n) => !n.is_read);
   const read = notifications.filter((n) => n.is_read);

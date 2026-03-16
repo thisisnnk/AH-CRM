@@ -11,7 +11,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "@/hooks/use-toast";
-import { ArrowLeft, Upload, Phone, Mail, MapPin, ExternalLink, FileText, MessageSquare, Mic, RefreshCw, X, Loader2, CheckCircle } from "lucide-react";
+import { ArrowLeft, Upload, Phone, Mail, MapPin, ExternalLink, FileText, MessageSquare, Mic, RefreshCw, X, Loader2, CheckCircle, Trash2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { sendNotification } from "@/utils/notificationHelper";
@@ -169,7 +170,8 @@ export default function LeadDetailPage() {
   const [personalForm, setPersonalForm] = useState({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "" });
   const [isEditingLeadInfo, setIsEditingLeadInfo] = useState(false);
   const [isSavingLeadInfo, setIsSavingLeadInfo] = useState(false);
-  const [leadInfoForm, setLeadInfoForm] = useState({ lead_source: "", status: "", itinerary_code: "", destination: "", travelers: "", trip_duration: "", tour_category: "" });
+  const [leadInfoForm, setLeadInfoForm] = useState({ lead_source: "", status: "", itinerary_code: "", destination: "", travelers: "", trip_duration: "", tour_category: "", travel_date: "", budget: "" });
+  const [noteForm, setNoteForm] = useState({ note_to_user: "", note_message: "" });
 
   // ── Upload helper — sends to Cloudflare R2 ──
   const uploadFile = (file: File, folder: string, setProgress: (n: number) => void): Promise<string> =>
@@ -208,6 +210,15 @@ export default function LeadDetailPage() {
     queryKey: ["lead-tasks", id],
     queryFn: async () => {
       const { data } = await supabase.from("tasks").select("*").eq("lead_id", id!).order("created_at", { ascending: false });
+      return data ?? [];
+    },
+    enabled: !!id,
+  });
+
+  const { data: leadNotes = [] } = useQuery({
+    queryKey: ["lead-notes", id],
+    queryFn: async () => {
+      const { data } = await supabase.from("lead_notes").select("*").eq("lead_id", id!).order("created_at", { ascending: false });
       return data ?? [];
     },
     enabled: !!id,
@@ -458,7 +469,86 @@ export default function LeadDetailPage() {
     },
   });
 
+  const deleteRevision = useMutation({
+    mutationFn: async (revId: string) => {
+      const { error, count } = await supabase
+        .from("revisions")
+        .delete({ count: "exact" })
+        .eq("id", revId);
+      if (error) throw error;
+      if (count === 0) throw new Error("Could not delete revision. Check Supabase RLS policies.");
+    },
+    onSuccess: () => {
+      toast({ title: "Revision deleted" });
+      queryClient.invalidateQueries({ queryKey: ["revisions", id] });
+      queryClient.invalidateQueries({ queryKey: ["lead", id] });
+      queryClient.invalidateQueries({ queryKey: ["activities", id] });
+    },
+    onError: (err: any) => toast({ title: "Error deleting revision", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteTask = useMutation({
+    mutationFn: async (taskId: string) => {
+      const { error, count } = await supabase
+        .from("tasks")
+        .delete({ count: "exact" })
+        .eq("id", taskId);
+      if (error) throw error;
+      if (count === 0) throw new Error("Could not delete task. Check Supabase RLS policies.");
+    },
+    onSuccess: () => {
+      toast({ title: "Task deleted" });
+      queryClient.invalidateQueries({ queryKey: ["lead-tasks", id] });
+      queryClient.invalidateQueries({ queryKey: ["activities", id] });
+    },
+    onError: (err: any) => toast({ title: "Error deleting task", description: err.message, variant: "destructive" }),
+  });
+
+  const deleteNote = useMutation({
+    mutationFn: async (noteId: string) => {
+      const { error, count } = await supabase
+        .from("lead_notes")
+        .delete({ count: "exact" })
+        .eq("id", noteId);
+      if (error) throw error;
+      if (count === 0) throw new Error("Could not delete note. Check Supabase RLS policies.");
+    },
+    onSuccess: () => {
+      toast({ title: "Note deleted" });
+      queryClient.invalidateQueries({ queryKey: ["lead-notes", id] });
+    },
+    onError: (err: any) => toast({ title: "Error deleting note", description: err.message, variant: "destructive" }),
+  });
+
+  const createNote = useMutation({
+    mutationFn: async () => {
+      if (!user || !noteForm.note_to_user || !noteForm.note_message.trim()) throw new Error("Fill all required fields");
+      const { error } = await supabase.from("lead_notes").insert({
+        lead_id: id!,
+        client_id: lead?.client_id ?? null,
+        lead_name: lead?.name ?? null,
+        note_to_user: noteForm.note_to_user,
+        note_message: noteForm.note_message.trim(),
+        created_by: user.id,
+      });
+      if (error) throw error;
+      await supabase.from("leads").update({ last_activity_at: new Date().toISOString() }).eq("id", id!);
+    },
+    onSuccess: () => {
+      toast({ title: "Note saved" });
+      setNoteForm({ note_to_user: "", note_message: "" });
+      queryClient.invalidateQueries({ queryKey: ["lead-notes", id] });
+      queryClient.invalidateQueries({ queryKey: ["lead", id] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Error saving note", description: err.message, variant: "destructive" });
+    },
+  });
+
   if (!lead) return <div className="py-8 text-center text-muted-foreground">Loading...</div>;
+
+  // Permission check: only admin or assigned employee can delete
+  const canDelete = isAdmin || lead.assigned_employee_id === user?.id;
 
   // ── Edit handlers ──
   const startEditPersonal = () => {
@@ -477,7 +567,7 @@ export default function LeadDetailPage() {
   };
 
   const startEditLeadInfo = () => {
-    setLeadInfoForm({ lead_source: lead.lead_source || "", status: lead.status || "Open", itinerary_code: lead.itinerary_code || "", destination: lead.destination || "", travelers: String(lead.travelers || ""), trip_duration: lead.trip_duration || "", tour_category: lead.tour_category || "" });
+    setLeadInfoForm({ lead_source: lead.lead_source || "", status: lead.status || "Open", itinerary_code: lead.itinerary_code || "", destination: lead.destination || "", travelers: String(lead.travelers || ""), trip_duration: lead.trip_duration || "", tour_category: lead.tour_category || "", travel_date: lead.travel_date || "", budget: lead.budget || "" });
     setIsEditingLeadInfo(true);
   };
   const saveLeadInfo = () => {
@@ -490,6 +580,8 @@ export default function LeadDetailPage() {
       travelers: leadInfoForm.travelers ? parseInt(leadInfoForm.travelers) : null,
       trip_duration: leadInfoForm.trip_duration || null,
       tour_category: leadInfoForm.tour_category || null,
+      travel_date: leadInfoForm.travel_date || null,
+      budget: leadInfoForm.budget || null,
     };
     if (leadInfoForm.status === "Lost" || leadInfoForm.status === "Converted") {
       updates.badge_stage = leadInfoForm.status;
@@ -711,6 +803,18 @@ export default function LeadDetailPage() {
               </Select>
             ) : <p className="mt-1 text-sm">{lead.tour_category || "—"}</p>}
           </div>
+          <div>
+            <Label className="text-muted-foreground text-xs">Travel Date</Label>
+            {isEditingLeadInfo
+              ? <Input type="date" value={leadInfoForm.travel_date} onChange={(e) => setLeadInfoForm({ ...leadInfoForm, travel_date: e.target.value })} className="h-8 mt-1" />
+              : <p className="mt-1 text-sm">{lead.travel_date ? format(new Date(lead.travel_date), "MMM d, yyyy") : "—"}</p>}
+          </div>
+          <div>
+            <Label className="text-muted-foreground text-xs">Budget</Label>
+            {isEditingLeadInfo
+              ? <Input value={leadInfoForm.budget} onChange={(e) => setLeadInfoForm({ ...leadInfoForm, budget: e.target.value })} className="h-8 mt-1" placeholder="e.g. ₹50,000" />
+              : <p className="mt-1 text-sm">{lead.budget || "—"}</p>}
+          </div>
         </CardContent>
       </Card>
 
@@ -801,13 +905,19 @@ export default function LeadDetailPage() {
                       </a>
                     )}
                   </div>
-                  <div className="text-right">
+                  <div className="text-right flex flex-col items-end gap-1">
                     <span className={cn("text-xs px-2 py-0.5 rounded-full",
                       rev.send_status === "Sent" ? "bg-success/10 text-success" :
                       "bg-info/10 text-info")}>
                       {rev.send_status === "Sent" ? "Sent" : "Submitted"}
                     </span>
-                    <p className="text-xs text-muted-foreground mt-1">{format(new Date(rev.created_at!), "MMM d, yyyy")}</p>
+                    <p className="text-xs text-muted-foreground">{format(new Date(rev.created_at!), "MMM d, yyyy")}</p>
+                    {canDelete && (
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                        onClick={() => { if (confirm("Delete this revision?")) deleteRevision.mutate(rev.id); }}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -877,10 +987,80 @@ export default function LeadDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Tasks & Follow Up */}
+      {/* Notes & Tasks Tabs */}
       <Card>
-        <CardHeader><CardTitle>Tasks & Follow Up</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
+        <CardHeader><CardTitle>Notes & Tasks</CardTitle></CardHeader>
+        <CardContent>
+          <Tabs defaultValue="tasks">
+            <TabsList className="mb-4">
+              <TabsTrigger value="notes">Notes</TabsTrigger>
+              <TabsTrigger value="tasks">Tasks</TabsTrigger>
+            </TabsList>
+
+            {/* ── NOTES TAB ── */}
+            <TabsContent value="notes" className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <Label>Client ID</Label>
+                  <Input value={lead.client_id ?? ""} readOnly className="bg-muted/40 cursor-default" placeholder="—" />
+                </div>
+                <div>
+                  <Label>Lead Name</Label>
+                  <Input value={lead.name ?? ""} readOnly className="bg-muted/40 cursor-default" />
+                </div>
+                <div className="col-span-1 md:col-span-2">
+                  <Label>Notes To *</Label>
+                  <Select value={noteForm.note_to_user} onValueChange={(v) => setNoteForm({ ...noteForm, note_to_user: v })}>
+                    <SelectTrigger><SelectValue placeholder="Select recipient" /></SelectTrigger>
+                    <SelectContent>
+                      {employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="col-span-1 md:col-span-2">
+                  <Label>Note Message *</Label>
+                  <Textarea
+                    value={noteForm.note_message}
+                    onChange={(e) => setNoteForm({ ...noteForm, note_message: e.target.value })}
+                    placeholder="Type your note here..."
+                    className="min-h-[100px] resize-y"
+                  />
+                </div>
+              </div>
+              <Button
+                onClick={() => createNote.mutate()}
+                disabled={!noteForm.note_to_user || !noteForm.note_message.trim() || createNote.isPending}
+              >
+                {createNote.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> Saving...</> : "Save Note"}
+              </Button>
+              <Separator />
+              {leadNotes.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No notes yet</p>
+              ) : (
+                <div className="space-y-3">
+                  {leadNotes.map((n) => (
+                    <div key={n.id} className="p-3 rounded-lg border bg-muted/20">
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-muted-foreground">To: {employees.find((e) => e.user_id === n.note_to_user)?.name ?? n.note_to_user}</p>
+                          <p className="text-sm mt-1">{n.note_message}</p>
+                          <p className="text-xs text-muted-foreground mt-1">{format(new Date(n.created_at!), "MMM d, yyyy HH:mm")}</p>
+                        </div>
+                        {canDelete && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 shrink-0"
+                            onClick={() => { if (confirm("Delete this note?")) deleteNote.mutate(n.id); }}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            {/* ── TASKS TAB ── */}
+            <TabsContent value="tasks" className="space-y-4">
           {tasks.map((t) => (
             <div key={t.id} className={cn("p-3 rounded-lg border", t.status === "Completed" ? "bg-success/5" : new Date(t.follow_up_date) < new Date() ? "border-destructive/50 bg-destructive/5" : "")}>
               <div className="flex justify-between items-start gap-2">
@@ -907,6 +1087,12 @@ export default function LeadDetailPage() {
                     >
                       <Upload className="h-3 w-3 mr-1" />
                       {proofTaskId === t.id ? "Cancel" : "Upload Proof"}
+                    </Button>
+                  )}
+                  {canDelete && (
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                      onClick={() => { if (confirm("Delete this task?")) deleteTask.mutate(t.id); }}>
+                      <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   )}
                 </div>
@@ -947,12 +1133,10 @@ export default function LeadDetailPage() {
           <Separator />
           <p className="font-medium text-sm">Add Task</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {/* Client ID — read-only from lead */}
             <div>
               <Label>Client ID</Label>
               <Input value={lead.client_id ?? ""} readOnly className="bg-muted/40 cursor-default" placeholder="—" />
             </div>
-            {/* Name — read-only from lead */}
             <div>
               <Label>Name</Label>
               <Input value={lead.name ?? ""} readOnly className="bg-muted/40 cursor-default" />
@@ -1002,6 +1186,8 @@ export default function LeadDetailPage() {
             </Button>
             {taskSubmitError && <p className="text-sm text-destructive">{taskSubmitError}</p>}
           </div>
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
 

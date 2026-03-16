@@ -54,7 +54,7 @@ export default function LeadsPage() {
     queryFn: async () => {
       let query = supabase
         .from("leads")
-        .select("id,client_id,enquiry_date,lead_source,itinerary_code,name,phone,destination,trip_duration,assigned_employee_id,travelers,status,badge_stage,last_activity_at,created_at")
+        .select("id,client_id,enquiry_date,lead_source,itinerary_code,name,phone,destination,trip_duration,assigned_employee_id,travelers,status,badge_stage,last_activity_at,created_at,travel_date,budget")
         .gte("created_at", fromDate.toISOString())
         .lte("created_at", endOfDay(toDate).toISOString())
         .order("created_at", { ascending: false });
@@ -559,6 +559,8 @@ export default function LeadsPage() {
               <th className="text-center py-3 px-6 whitespace-nowrap min-w-[160px]">Phone</th>
               <th className="text-center py-3 px-6 whitespace-nowrap min-w-[180px]">Destination</th>
               <th className="text-center py-3 px-6 whitespace-nowrap min-w-[200px]">Duration</th>
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[160px]">Travel Date</th>
+              <th className="text-center py-3 px-6 whitespace-nowrap min-w-[140px]">Budget</th>
               {isAdmin && (
                 <th className="text-center py-3 px-6 whitespace-nowrap min-w-[180px]">
                   <span className="inline-flex items-center gap-1">
@@ -626,6 +628,8 @@ export default function LeadsPage() {
                 <td className="py-3 px-6 whitespace-nowrap">{lead.phone}</td>
                 <td className="py-3 px-6 whitespace-nowrap">{lead.destination ?? "—"}</td>
                 <td className="py-3 px-6 whitespace-nowrap">{lead.trip_duration ?? "—"}</td>
+                <td className="py-3 px-6 whitespace-nowrap">{lead.travel_date ? format(new Date(lead.travel_date), "MMM d, yyyy") : "—"}</td>
+                <td className="py-3 px-6 whitespace-nowrap">{lead.budget ?? "—"}</td>
                 {isAdmin && (
                   <td className="py-3 px-6 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     <Select
