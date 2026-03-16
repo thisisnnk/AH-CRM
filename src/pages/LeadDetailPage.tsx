@@ -511,7 +511,7 @@ export default function LeadDetailPage() {
     setItineraryProgress(0);
     setItinerarySubmitError(null);
     try {
-      const url = await uploadFile(file, "itineraries", setItineraryProgress);
+      const url = await uploadFile(file, "revisions", setItineraryProgress);
       itineraryUrlRef.current = url;   // ref always has the latest URL
       setItineraryUrl(url);
       setItineraryUploaded(true);
@@ -538,7 +538,7 @@ export default function LeadDetailPage() {
   };
 
   const handleRevFileUpload = async (file: File, type: string) => {
-    const folder = type === "Call Recording" ? "recordings" : type === "Revised Itinerary" ? "itineraries" : "revisions";
+    const folder = "revisions";
     setRevUploading(true);
     setRevProgress(0);
     setRevSubmitError(null);
@@ -736,7 +736,7 @@ export default function LeadDetailPage() {
               <p className="font-medium text-sm">Submit Itinerary</p>
 
               <FileUploadWidget
-                accept=".pdf,.doc,.docx,.xls,.xlsx,image/*"
+                accept="application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/*"
                 label="Itinerary File *"
                 file={itineraryFile}
                 onSelect={(f) => {
@@ -835,7 +835,7 @@ export default function LeadDetailPage() {
             {(revForm.type === "Chat Screenshot" || revForm.type === "Call Recording" || revForm.type === "Revised Itinerary") && (
               <>
                 <FileUploadWidget
-                  accept={revForm.type === "Chat Screenshot" ? "image/*" : revForm.type === "Call Recording" ? "audio/*,video/*" : ".pdf,.doc,.docx,image/*"}
+                  accept={revForm.type === "Chat Screenshot" ? "image/*" : revForm.type === "Call Recording" ? "*/*" : "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"}
                   label={revForm.type === "Chat Screenshot" ? "Screenshot File *" : revForm.type === "Call Recording" ? "Recording File *" : "Itinerary File *"}
                   file={revFile}
                   onSelect={(f) => {
@@ -916,7 +916,7 @@ export default function LeadDetailPage() {
               {proofTaskId === t.id && (
                 <div className="mt-3 pt-3 border-t space-y-3">
                   <FileUploadWidget
-                    accept="image/*,.pdf,.doc,.docx"
+                    accept="image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                     label="Proof File *"
                     file={proofFile}
                     onSelect={(f) => {
