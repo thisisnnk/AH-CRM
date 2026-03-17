@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
@@ -23,6 +24,8 @@ import { PageLoadingBar } from "@/components/PageLoadingBar";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const sourceOptions = ["Instagram", "Website", "Referral", "Office Direct Lead"] as const;
+
+const normalizePhone = (phone: string) => phone.replace(/\D/g, "").slice(-10);
 
 export default function LeadsPage() {
   const { role, user } = useAuth();
@@ -48,6 +51,10 @@ export default function LeadsPage() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [waDialCode, setWaDialCode] = useState("+91");
   const [waNumber, setWaNumber] = useState("");
+  const [leadToDelete, setLeadToDelete] = useState<string | null>(null);
+  const [existingContact, setExistingContact] = useState<any | null>(null);
+  const [existingTripCount, setExistingTripCount] = useState(0);
+  const [phoneCheckLoading, setPhoneCheckLoading] = useState(false);
 
   const { data: leads = [], isLoading: leadsLoading } = useQuery({
     queryKey: ["leads", format(fromDate, "yyyy-MM-dd"), format(toDate, "yyyy-MM-dd"), user?.id, role, search],
@@ -132,32 +139,105 @@ export default function LeadsPage() {
   const fullPhone = phoneDialCode + phoneNumber;
   const fullWa = waNumber ? waDialCode + waNumber : "";
 
-  const createLead = useMutation({
-    mutationFn: async () => {
-      const clientId = await generateClientId();
+  const handlePhoneNumberChange = async (value: string) => {
+    setPhoneNumber(value);
+    const normalized = normalizePhone(phoneDialCode + value);
+    if (normalized.length === 10) {
+      setPhoneCheckLoading(true);
+      const { data: contact } = await supabase
+        .from("contacts")
+        .select("*")
+        .ilike("phone", `%${normalized}`)
+        .maybeSingle();
+      if (contact) {
+        setExistingContact(contact);
+        const { count } = await supabase
+          .from("leads")
+          .select("*", { count: "exact", head: true })
+          .eq("contact_id", contact.id);
+        setExistingTripCount(count ?? 0);
+      } else {
+        setExistingContact(null);
+        setExistingTripCount(0);
+      }
+      setPhoneCheckLoading(false);
+    } else {
+      setExistingContact(null);
+      setExistingTripCount(0);
+    }
+  };
 
-      const { data: contactData, error: contactErr } = await supabase.from("contacts").insert({
-        contact_id: clientId,
-        name: newLead.name,
-        phone: fullPhone,
-        whatsapp: fullWa || null,
-        email: newLead.email || null,
-        city: newLead.city || null,
-        state: newLead.state || null,
-        country: newLead.country || null,
-      }).select("id").single();
-      if (contactErr) throw contactErr;
+  const createLead = useMutation({
+    mutationFn: async (): Promise<{ isExistingClient: boolean }> => {
+      const normalizedPhone = normalizePhone(fullPhone);
+
+      // Check if a contact with this phone already exists
+      const { data: existingContact } = await supabase
+        .from("contacts")
+        .select("*")
+        .ilike("phone", `%${normalizedPhone}`)
+        .maybeSingle();
+
+      let contactId: string;
+      let contactDbId: string;
+      let contactName: string;
+      let contactPhone: string;
+      let contactWhatsapp: string | null;
+      let contactEmail: string | null;
+      let contactCity: string | null;
+      let contactState: string | null;
+      let contactCountry: string | null;
+
+      if (existingContact) {
+        // Reuse existing contact — do NOT create a duplicate
+        contactId = existingContact.contact_id;
+        contactDbId = existingContact.id;
+        contactName = existingContact.name;
+        contactPhone = existingContact.phone;
+        contactWhatsapp = existingContact.whatsapp;
+        contactEmail = existingContact.email;
+        contactCity = existingContact.city;
+        contactState = existingContact.state;
+        contactCountry = existingContact.country;
+      } else {
+        // New contact — generate ID and insert
+        const clientId = await generateClientId();
+        const { data: contactData, error: contactErr } = await supabase
+          .from("contacts")
+          .insert({
+            contact_id: clientId,
+            name: newLead.name,
+            phone: fullPhone,
+            whatsapp: fullWa || null,
+            email: newLead.email || null,
+            city: newLead.city || null,
+            state: newLead.state || null,
+            country: newLead.country || null,
+          })
+          .select()
+          .single();
+        if (contactErr) throw contactErr;
+        contactId = clientId;
+        contactDbId = contactData.id;
+        contactName = newLead.name;
+        contactPhone = fullPhone;
+        contactWhatsapp = fullWa || null;
+        contactEmail = newLead.email || null;
+        contactCity = newLead.city || null;
+        contactState = newLead.state || null;
+        contactCountry = newLead.country || null;
+      }
 
       const { error: leadErr } = await supabase.from("leads").insert({
-        client_id: clientId,
-        contact_id: contactData.id,
-        name: newLead.name,
-        phone: fullPhone,
-        whatsapp: fullWa || null,
-        email: newLead.email || null,
-        city: newLead.city || null,
-        state: newLead.state || null,
-        country: newLead.country || null,
+        client_id: contactId,
+        contact_id: contactDbId,
+        name: contactName,
+        phone: contactPhone,
+        whatsapp: contactWhatsapp,
+        email: contactEmail,
+        city: contactCity,
+        state: contactState,
+        country: contactCountry,
         destination: newLead.destination || null,
         travelers: newLead.travelers ? parseInt(newLead.travelers) : null,
         trip_duration: newLead.trip_duration || null,
@@ -170,17 +250,25 @@ export default function LeadsPage() {
         await sendNotification({
           recipientId: newLead.assigned_employee_id,
           type: "lead_assigned",
-          message: `New lead "${newLead.name}" has been assigned to you`,
+          message: `New lead "${contactName}" has been assigned to you`,
           leadId: undefined,
         });
       }
+
+      return { isExistingClient: !!existingContact };
     },
-    onSuccess: () => {
-      toast({ title: "Lead created", description: "Contact was also created automatically." });
+    onSuccess: ({ isExistingClient }) => {
+      toast({
+        title: "Trip created",
+        description: isExistingClient
+          ? "Existing client found. New trip created."
+          : "New contact and trip created successfully.",
+      });
       setCreateOpen(false);
       setNewLead({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "", destination: "", travelers: "", trip_duration: "", lead_source: "", assigned_employee_id: "" });
       setPhoneDialCode("+91"); setPhoneNumber("");
       setWaDialCode("+91"); setWaNumber("");
+      setExistingContact(null); setExistingTripCount(0);
       queryClient.invalidateQueries({ queryKey: ["leads"] });
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },
@@ -340,6 +428,7 @@ export default function LeadsPage() {
   };
 
   return (
+    <>
     <div className="space-y-6 animate-fade-in">
       <PageLoadingBar loading={leadsLoading} />
       {/* Header row: Title + Incoming Leads tab + New Lead button */}
@@ -360,7 +449,7 @@ export default function LeadsPage() {
                 </span>
               )}
             </Button>
-            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+            <Dialog open={createOpen} onOpenChange={(open) => { setCreateOpen(open); if (!open) { setExistingContact(null); setExistingTripCount(0); } }}>
               <DialogTrigger asChild>
                 <Button size="sm"><Plus className="h-4 w-4 mr-1" /> New Lead</Button>
               </DialogTrigger>
@@ -373,8 +462,32 @@ export default function LeadsPage() {
                       label="Phone" required
                       dialCode={phoneDialCode} number={phoneNumber}
                       onDialCodeChange={setPhoneDialCode}
-                      onNumberChange={setPhoneNumber}
+                      onNumberChange={handlePhoneNumberChange}
                     />
+                    {phoneCheckLoading && (
+                      <p className="text-xs text-muted-foreground mt-1">Checking client...</p>
+                    )}
+                    {existingContact && (
+                      <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-sm">
+                        <p className="font-semibold text-amber-800">
+                          Existing client: {existingContact.name}
+                          {existingTripCount > 0 && (
+                            <span className="font-normal text-amber-700"> · {existingTripCount} trip{existingTripCount !== 1 ? "s" : ""}</span>
+                          )}
+                        </p>
+                        <p className="text-xs text-amber-600 mt-0.5">
+                          Fill in Source &amp; Assign To below, then click "Create New Trip".
+                        </p>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="mt-2 text-xs h-7 border-amber-400 text-amber-800 hover:bg-amber-100"
+                          onClick={() => { setCreateOpen(false); navigate("/contacts"); }}
+                        >
+                          View Client
+                        </Button>
+                      </div>
+                    )}
                   </div>
                   <div className="col-span-1 sm:col-span-2">
                     <PhoneInput
@@ -407,7 +520,7 @@ export default function LeadsPage() {
                   </div>
                 </div>
                 <Button className="w-full mt-4" onClick={() => createLead.mutate()} disabled={!newLead.name || !isPhoneValid(phoneDialCode, phoneNumber) || !newLead.lead_source || !newLead.assigned_employee_id || createLead.isPending || (waNumber.length > 0 && !isPhoneValid(waDialCode, waNumber))}>
-                  {createLead.isPending ? "Creating lead..." : "Create Lead"}
+                  {createLead.isPending ? "Creating..." : existingContact ? "Create New Trip" : "Create Lead"}
                 </Button>
               </DialogContent>
             </Dialog>
@@ -661,11 +774,7 @@ export default function LeadsPage() {
                 <td className="py-3 px-6 whitespace-nowrap text-muted-foreground text-xs">{lead.last_activity_at ? format(new Date(lead.last_activity_at), "MMM d, yyyy") : "—"}</td>
                 {isAdmin && (
                   <td className="py-3 px-6 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => {
-                      if (confirm("Are you sure you want to delete this lead?")) {
-                        deleteLead.mutate(lead.id);
-                      }
-                    }}>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => setLeadToDelete(lead.id)}>
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </td>
@@ -686,5 +795,31 @@ export default function LeadsPage() {
         </table>
       </div>
     </div>
+
+    <AlertDialog open={!!leadToDelete} onOpenChange={() => setLeadToDelete(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete Trip?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to delete this trip? All associated tasks, activity logs, and revisions will also be removed. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={() => {
+              if (leadToDelete) {
+                deleteLead.mutate(leadToDelete);
+                setLeadToDelete(null);
+              }
+            }}
+          >
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }
