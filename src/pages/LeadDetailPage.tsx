@@ -185,6 +185,17 @@ export default function LeadDetailPage() {
       return data;
     },
     enabled: !!id && !!user,
+    // Show partial data from the leads-list cache immediately so the page
+    // renders at once while the full detail fetch runs in the background.
+    placeholderData: () => {
+      const cached = queryClient.getQueriesData<any[]>({ queryKey: ["leads"] });
+      for (const [, list] of cached) {
+        if (!Array.isArray(list)) continue;
+        const found = list.find((l: any) => l.id === id);
+        if (found) return found;
+      }
+      return undefined;
+    },
   });
 
   const { data: revisions = [] } = useQuery({
@@ -592,7 +603,7 @@ export default function LeadDetailPage() {
     },
   });
 
-  if (leadLoading) return <div className="py-8 text-center text-muted-foreground">Loading...</div>;
+  if (!lead && leadLoading) return <div className="py-8 text-center text-muted-foreground">Loading...</div>;
   if (!lead) return <div className="py-8 text-center text-muted-foreground">Lead not found.</div>;
 
   // Permission check: only admin or assigned employee can delete

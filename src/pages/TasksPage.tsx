@@ -68,8 +68,8 @@ export default function TasksPage() {
         .order("completed_at", { ascending: false });
       return data ?? [];
     },
+    enabled: !!user,
     refetchOnMount: "always",
-    staleTime: 30_000,
   });
 
   const { data: incompleteTasks = [], isLoading: incompleteLoading } = useQuery({
@@ -82,8 +82,8 @@ export default function TasksPage() {
         .order("created_at", { ascending: false });
       return data ?? [];
     },
+    enabled: !!user,
     refetchOnMount: "always",
-    staleTime: 30_000,
   });
 
   const selectedLead = leads.find((l) => l.id === taskForm.leadId);

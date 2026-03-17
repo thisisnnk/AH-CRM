@@ -14,7 +14,7 @@ const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 // so both timeout-abort and Supabase's own abort work correctly.
 const fetchWithTimeout: typeof fetch = (input, init) => {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 12_000);
+  const timer = setTimeout(() => controller.abort(), 8_000);
 
   // Combine Supabase's own signal (if any) with our timeout signal so both work.
   let signal: AbortSignal = controller.signal;

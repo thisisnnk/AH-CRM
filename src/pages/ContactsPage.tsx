@@ -16,7 +16,7 @@ import { PageLoadingBar } from "@/components/PageLoadingBar";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function ContactsPage() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const isAdmin = role === "admin";
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -52,7 +52,7 @@ export default function ContactsPage() {
       }
       return { contacts: data ?? [], total: count ?? 0 };
     },
-    staleTime: 2 * 60_000,
+    enabled: !!user,
     placeholderData: keepPreviousData,
     retry: 2,
   });

@@ -620,7 +620,7 @@ export default function LeadsPage() {
           </thead>
           <tbody>
             {filteredLeads.map((lead) => (
-              <tr key={lead.id} className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => navigate(`/leads/${lead.id}`)}>
+              <tr key={lead.id} className="border-b hover:bg-muted/30 cursor-pointer" onClick={() => { queryClient.setQueryData(["lead", lead.id], (old: any) => old ?? lead); navigate(`/leads/${lead.id}`); }}>
                 <td className="py-3 px-6 whitespace-nowrap">{lead.enquiry_date ? format(new Date(lead.enquiry_date), "MMM d, yyyy") : "—"}</td>
                 <td className="py-3 px-6 whitespace-nowrap">{lead.lead_source ?? "—"}</td>
                 <td className="py-3 px-6 whitespace-nowrap">{lead.itinerary_code ?? "—"}</td>

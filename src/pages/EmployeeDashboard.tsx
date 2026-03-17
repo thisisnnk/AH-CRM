@@ -63,8 +63,6 @@ export default function EmployeeDashboard() {
       return data ?? [];
     },
     enabled: !!user,
-    refetchOnMount: "always",
-    staleTime: 30_000,
   });
 
   const { data: tasks = [] } = useQuery({
@@ -79,8 +77,6 @@ export default function EmployeeDashboard() {
       return data ?? [];
     },
     enabled: !!user,
-    refetchOnMount: "always",
-    staleTime: 30_000,
   });
 
   // Auto-upload as soon as a file is selected — no separate "Upload File" step needed

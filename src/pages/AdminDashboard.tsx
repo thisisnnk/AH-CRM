@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, Globe, MapPin, Anchor, Download } from "lucide-react";
 import { format, subDays, endOfDay } from "date-fns";
@@ -98,6 +99,7 @@ const StatusPieChart = ({
 );
 
 export default function AdminDashboard() {
+  const { user } = useAuth();
   const [fromDate, setFromDate] = useState<Date>(subDays(new Date(), 30));
   const [toDate, setToDate] = useState<Date>(new Date());
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -112,7 +114,7 @@ export default function AdminDashboard() {
         .lte("created_at", endOfDay(toDate).toISOString());
       return data ?? [];
     },
-    staleTime: 2 * 60_000,
+    enabled: !!user,
   });
 
   const { data: employees = [] } = useQuery({
@@ -121,6 +123,7 @@ export default function AdminDashboard() {
       const { data } = await supabase.from("profiles").select("*");
       return data ?? [];
     },
+    enabled: !!user,
     staleTime: 5 * 60_000,
   });
 

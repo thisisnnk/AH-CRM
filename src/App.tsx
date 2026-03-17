@@ -24,6 +24,7 @@ const queryClient = new QueryClient({
       staleTime: 0,                // always treat data as stale → always refetch on mount
       gcTime: 5 * 60_000,          // keep unused data in memory for 5 min
       retry: 1,
+      retryDelay: 0,               // retry immediately (no delay) after a timeout/error
       refetchOnMount: true,
       refetchOnWindowFocus: true,  // refetch when user returns to the tab
     },

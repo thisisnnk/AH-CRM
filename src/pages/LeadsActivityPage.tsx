@@ -53,7 +53,7 @@ export default function LeadsActivityPage() {
 
   // Raw activity logs + lead data — fetched independently, no employee dependency
   const { data: rawActivities = [], isLoading: activitiesLoading } = useQuery({
-    queryKey: ["all-activity-logs"],
+    queryKey: ["all-activity-logs", user?.id, isAdmin],
     queryFn: async () => {
       let logsQuery = supabase
         .from("activity_logs")
@@ -160,7 +160,7 @@ export default function LeadsActivityPage() {
           };
         });
     },
-    staleTime: 60_000,
+    enabled: !!user,
   });
 
   // Enrich with employee names once employees are loaded (names show "—" until then)
@@ -182,7 +182,7 @@ export default function LeadsActivityPage() {
         .eq("status", "On Progress");
       return data ?? [];
     },
-    staleTime: 60_000,
+    enabled: !!user,
   });
 
   // ── Realtime subscription: refresh activity table on any insert ──
@@ -193,7 +193,7 @@ export default function LeadsActivityPage() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "activity_logs" },
         () => {
-          queryClient.invalidateQueries({ queryKey: ["all-activity-logs"] });
+          queryClient.invalidateQueries({ queryKey: ["all-activity-logs", user?.id, isAdmin] });
         }
       )
       .subscribe();
