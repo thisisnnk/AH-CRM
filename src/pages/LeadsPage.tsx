@@ -77,7 +77,6 @@ export default function LeadsPage() {
       return data ?? [];
     },
     enabled: !!user,
-    staleTime: 2 * 60_000,
     placeholderData: keepPreviousData,
     retry: 2,
   });
@@ -182,7 +181,6 @@ export default function LeadsPage() {
       setNewLead({ name: "", phone: "", whatsapp: "", email: "", city: "", state: "", country: "", destination: "", travelers: "", trip_duration: "", lead_source: "", assigned_employee_id: "" });
       setPhoneDialCode("+91"); setPhoneNumber("");
       setWaDialCode("+91"); setWaNumber("");
-      setToDate(new Date());
       queryClient.invalidateQueries({ queryKey: ["leads"] });
       queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },

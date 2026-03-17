@@ -21,8 +21,8 @@ import { ProtectedLayout, AdminRoute } from "./components/ProtectedLayout";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 2 * 60_000,       // cached data stays fresh for 2 min
-      gcTime: 10 * 60_000,         // keep unused data in memory for 10 min
+      staleTime: 0,                // always treat data as stale → always refetch on mount
+      gcTime: 5 * 60_000,          // keep unused data in memory for 5 min
       retry: 1,
       refetchOnMount: true,
       refetchOnWindowFocus: true,  // refetch when user returns to the tab

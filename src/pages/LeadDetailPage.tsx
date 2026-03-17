@@ -178,14 +178,13 @@ export default function LeadDetailPage() {
     uploadToR2(file, folder, setProgress);
 
   // ── Queries ──
-  const { data: lead } = useQuery({
+  const { data: lead, isLoading: leadLoading } = useQuery({
     queryKey: ["lead", id],
     queryFn: async () => {
       const { data } = await supabase.from("leads").select("*").eq("id", id!).single();
       return data;
     },
-    enabled: !!id,
-    staleTime: 30_000,
+    enabled: !!id && !!user,
   });
 
   const { data: revisions = [] } = useQuery({
@@ -194,7 +193,7 @@ export default function LeadDetailPage() {
       const { data } = await supabase.from("revisions").select("*").eq("lead_id", id!).order("revision_number", { ascending: true });
       return data ?? [];
     },
-    enabled: !!id,
+    enabled: !!id && !!user,
   });
 
   const { data: activities = [] } = useQuery({
@@ -203,7 +202,7 @@ export default function LeadDetailPage() {
       const { data } = await supabase.from("activity_logs").select("*").eq("lead_id", id!).order("timestamp", { ascending: false });
       return data ?? [];
     },
-    enabled: !!id,
+    enabled: !!id && !!user,
   });
 
   const { data: tasks = [] } = useQuery({
@@ -212,7 +211,7 @@ export default function LeadDetailPage() {
       const { data } = await supabase.from("tasks").select("*").eq("lead_id", id!).order("created_at", { ascending: false });
       return data ?? [];
     },
-    enabled: !!id,
+    enabled: !!id && !!user,
   });
 
   const { data: leadNotes = [] } = useQuery({
@@ -221,7 +220,7 @@ export default function LeadDetailPage() {
       const { data } = await (supabase as any).from("lead_notes").select("*").eq("lead_id", id!).order("created_at", { ascending: false });
       return (data ?? []) as any[];
     },
-    enabled: !!id,
+    enabled: !!id && !!user,
   });
 
   const { data: employees = [] } = useQuery({
@@ -230,6 +229,7 @@ export default function LeadDetailPage() {
       const { data } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
       return data ?? [];
     },
+    enabled: !!user,
   });
 
   // True only when an actual itinerary file has been uploaded and sent — NOT just because a code was typed
@@ -237,13 +237,6 @@ export default function LeadDetailPage() {
   const hasItinerary = hasActualItinerary;
   const availableStatuses = hasItinerary ? ["Open", "On Progress", "Lost", "Converted"] : ["Open", "Lost", "Converted"];
 
-  // ── One-time cleanup: delete personal/lead-info update logs from DB ──
-  useEffect(() => {
-    if (!id) return;
-    supabase.from("activity_logs").delete().eq("lead_id", id).eq("action", "Updated lead").then(() => {
-      queryClient.invalidateQueries({ queryKey: ["activities", id] });
-    });
-  }, [id]);
 
   // ── Pre-populate task assignee from lead's assigned employee ──
   useEffect(() => {
@@ -316,7 +309,8 @@ export default function LeadDetailPage() {
       try {
         await supabase.from("activity_logs").insert({
           lead_id: id!, user_id: user.id, action: "Submitted itinerary",
-          details: url,
+          details: "Itinerary uploaded",
+          proof_url: url,
         });
       } catch { /* non-fatal */ }
     },
@@ -368,7 +362,8 @@ export default function LeadDetailPage() {
         await supabase.from("activity_logs").insert({
           lead_id: id!, user_id: user.id,
           action: `Added Revision ${nextNum} — ${revForm.type}`,
-          details: `${details}${revForm.notes ? `. Notes: ${revForm.notes}` : ""}`,
+          details: details,
+          proof_url: fileUrl,
         });
       } catch { /* non-fatal */ }
     },
@@ -455,7 +450,8 @@ export default function LeadDetailPage() {
       try {
         await supabase.from("activity_logs").insert({
           lead_id: id!, user_id: user.id, action: "Task proof uploaded",
-          details: url,
+          details: "Task proof uploaded",
+          proof_url: url,
         });
       } catch { /* non-fatal */ }
     },
@@ -473,13 +469,23 @@ export default function LeadDetailPage() {
   });
 
   const deleteRevision = useMutation({
-    mutationFn: async (revId: string) => {
+    mutationFn: async ({ revId, revisionNumber, revisionType }: { revId: string; revisionNumber: number; revisionType: string }) => {
       const { error, count } = await supabase
         .from("revisions")
         .delete({ count: "exact" })
         .eq("id", revId);
       if (error) throw error;
       if (count === 0) throw new Error("Could not delete revision. Check Supabase RLS policies.");
+      if (user && id) {
+        const userName = employees.find((e) => e.user_id === user.id)?.name ?? "Admin";
+        try {
+          await supabase.from("activity_logs").insert({
+            lead_id: id, user_id: user.id,
+            action: `${userName} deleted Revision ${revisionNumber}`,
+            details: revisionType || null,
+          });
+        } catch { /* non-fatal */ }
+      }
     },
     onSuccess: () => {
       toast({ title: "Revision deleted" });
@@ -491,13 +497,23 @@ export default function LeadDetailPage() {
   });
 
   const deleteTask = useMutation({
-    mutationFn: async (taskId: string) => {
+    mutationFn: async ({ taskId, taskDescription }: { taskId: string; taskDescription: string }) => {
       const { error, count } = await supabase
         .from("tasks")
         .delete({ count: "exact" })
         .eq("id", taskId);
       if (error) throw error;
       if (count === 0) throw new Error("Could not delete task. Check Supabase RLS policies.");
+      if (user && id) {
+        const userName = employees.find((e) => e.user_id === user.id)?.name ?? "Admin";
+        try {
+          await supabase.from("activity_logs").insert({
+            lead_id: id, user_id: user.id,
+            action: `${userName} deleted task`,
+            details: taskDescription || null,
+          });
+        } catch { /* non-fatal */ }
+      }
     },
     onSuccess: () => {
       toast({ title: "Task deleted" });
@@ -576,7 +592,8 @@ export default function LeadDetailPage() {
     },
   });
 
-  if (!lead) return <div className="py-8 text-center text-muted-foreground">Loading...</div>;
+  if (leadLoading) return <div className="py-8 text-center text-muted-foreground">Loading...</div>;
+  if (!lead) return <div className="py-8 text-center text-muted-foreground">Lead not found.</div>;
 
   // Permission check: only admin or assigned employee can delete
   const canDelete = isAdmin || lead.assigned_employee_id === user?.id;
@@ -945,7 +962,7 @@ export default function LeadDetailPage() {
                     <p className="text-xs text-muted-foreground">{format(new Date(rev.created_at!), "MMM d, yyyy")}</p>
                     {canDelete && (
                       <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                        onClick={() => { if (confirm("Delete this revision?")) deleteRevision.mutate(rev.id); }}>
+                        onClick={() => { if (confirm("Delete this revision?")) deleteRevision.mutate({ revId: rev.id, revisionNumber: rev.revision_number, revisionType: rev.notes ?? "" }); }}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     )}
@@ -1196,7 +1213,7 @@ export default function LeadDetailPage() {
                       )}
                       {canDelete && (
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                          onClick={() => { if (confirm("Delete this task?")) deleteTask.mutate(t.id); }}>
+                          onClick={() => { if (confirm("Delete this task?")) deleteTask.mutate({ taskId: t.id, taskDescription: t.description ?? "" }); }}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       )}
@@ -1251,26 +1268,42 @@ export default function LeadDetailPage() {
               a.action === "Task proof uploaded" ||
               a.action === "Note created" ||
               (a.action ?? "").startsWith("Added Revision") ||
-              (a.action ?? "").startsWith("Changed status to")
+              (a.action ?? "").startsWith("Changed status to") ||
+              (a.action ?? "").includes("deleted Revision") ||
+              (a.action ?? "").includes("deleted task")
             );
             return relevantActivities.length === 0 ? (
             <p className="text-sm text-muted-foreground">No activity recorded yet</p>
           ) : (
             <div className="space-y-2">
               {relevantActivities.map((a) => {
-                const isProofUrl = a.details?.startsWith("https://");
+                // Resolve proof URL: prefer dedicated proof_url column, fall back to file_url/upload_url,
+                // then fall back to details if it looks like a URL (http:// or https://)
+                const proofUrl: string | null =
+                  a.proof_url ||
+                  (a as any).file_url ||
+                  (a as any).upload_url ||
+                  (a.details?.startsWith("http") ? a.details : null);
+                // Show description text only when details is not itself a URL
+                const descriptionText =
+                  a.details && !a.details.startsWith("http") ? a.details : null;
                 return (
                 <div key={a.id} className="flex items-start gap-3 text-sm py-2 border-b last:border-0">
                   <div className="w-2 h-2 rounded-full bg-primary mt-2 shrink-0" />
                   <div>
                     <p className="font-medium">{a.action}</p>
-                    {a.details && !isProofUrl && <p className="text-xs text-muted-foreground">{a.details}</p>}
-                    {isProofUrl && (
-                      <a href={a.details} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline">
-                        View Proof
+                    {descriptionText && <p className="text-xs text-muted-foreground">{descriptionText}</p>}
+                    {proofUrl && (
+                      <a
+                        href={proofUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-yellow-600 font-medium hover:underline mt-0.5"
+                      >
+                        <ExternalLink className="h-3 w-3" /> View Proof
                       </a>
                     )}
-                    <p className="text-xs text-muted-foreground">{format(new Date(a.timestamp!), "MMM d, yyyy HH:mm")}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{format(new Date(a.timestamp!), "MMM d, yyyy HH:mm")}</p>
                   </div>
                 </div>
                 );

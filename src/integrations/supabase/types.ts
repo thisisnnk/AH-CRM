@@ -20,6 +20,7 @@ export type Database = {
           details: string | null
           id: string
           lead_id: string
+          proof_url: string | null
           timestamp: string | null
           user_id: string
         }
@@ -28,6 +29,7 @@ export type Database = {
           details?: string | null
           id?: string
           lead_id: string
+          proof_url?: string | null
           timestamp?: string | null
           user_id: string
         }
@@ -36,6 +38,7 @@ export type Database = {
           details?: string | null
           id?: string
           lead_id?: string
+          proof_url?: string | null
           timestamp?: string | null
           user_id?: string
         }
@@ -122,6 +125,7 @@ export type Database = {
         Row: {
           assigned_employee_id: string | null
           badge_stage: string | null
+          budget: string | null
           city: string | null
           client_id: string | null
           contact_id: string | null
@@ -139,6 +143,7 @@ export type Database = {
           state: string | null
           status: string | null
           tour_category: string | null
+          travel_date: string | null
           travelers: number | null
           trip_duration: string | null
           updated_at: string | null
@@ -147,6 +152,7 @@ export type Database = {
         Insert: {
           assigned_employee_id?: string | null
           badge_stage?: string | null
+          budget?: string | null
           city?: string | null
           client_id?: string | null
           contact_id?: string | null
@@ -164,6 +170,7 @@ export type Database = {
           state?: string | null
           status?: string | null
           tour_category?: string | null
+          travel_date?: string | null
           travelers?: number | null
           trip_duration?: string | null
           updated_at?: string | null
@@ -172,6 +179,7 @@ export type Database = {
         Update: {
           assigned_employee_id?: string | null
           badge_stage?: string | null
+          budget?: string | null
           city?: string | null
           client_id?: string | null
           contact_id?: string | null
@@ -189,6 +197,7 @@ export type Database = {
           state?: string | null
           status?: string | null
           tour_category?: string | null
+          travel_date?: string | null
           travelers?: number | null
           trip_duration?: string | null
           updated_at?: string | null
