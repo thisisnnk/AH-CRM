@@ -312,8 +312,10 @@ export default function LeadsPage() {
 
   const handleExport = () => {
     const rows = filteredLeads.map((l) => ({
-      "Client ID": l.client_id ?? "",
       "Enquiry Date": l.enquiry_date ? format(new Date(l.enquiry_date), "MMM d, yyyy") : "",
+      "Source": l.lead_source ?? "",
+      "Itinerary Code": l.itinerary_code ?? "",
+      "Client ID": l.client_id ?? "",
       "Name": l.name,
       "Phone": l.phone,
       "WhatsApp": l.whatsapp ?? "",
@@ -323,11 +325,11 @@ export default function LeadsPage() {
       "Country": l.country ?? "",
       "Destination": l.destination ?? "",
       "Duration": l.trip_duration ?? "",
-      "Travelers": l.travelers ?? "",
-      "Source": l.lead_source ?? "",
-      "Status": isAdmin ? (l.status ?? "") : (l.badge_stage ?? ""),
+      "Travel Date": l.travel_date ? format(new Date(l.travel_date), "MMM d, yyyy") : "",
+      "Budget": l.budget ?? "",
       "Assigned To": employees.find((e) => e.user_id === l.assigned_employee_id)?.name ?? "",
-      "Itinerary Code": l.itinerary_code ?? "",
+      "Pax": l.travelers ?? "",
+      "Status": isAdmin ? (l.status ?? "") : (l.badge_stage ?? ""),
       "Last Activity": l.last_activity_at ? format(new Date(l.last_activity_at), "MMM d, yyyy") : "",
     }));
     exportToExcel(
@@ -524,7 +526,7 @@ export default function LeadsPage() {
       {/* Table */}
       <div className="overflow-auto rounded-lg border" style={{ maxHeight: "70vh" }}>
         <table className="w-full text-sm" style={{ minWidth: "1600px" }}>
-          <thead className="bg-muted/50 sticky top-0 z-10">
+          <thead className="bg-muted sticky top-0 z-10">
             <tr>
               <th className="text-center py-3 px-6 whitespace-nowrap min-w-[160px]">Enquiry Date</th>
               <th className="text-center py-3 px-6 whitespace-nowrap min-w-[160px]">

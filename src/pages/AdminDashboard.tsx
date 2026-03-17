@@ -146,7 +146,8 @@ export default function AdminDashboard() {
         name: emp.name,
         value: pool.filter((l) => l.assigned_employee_id === emp.user_id).length,
       }))
-      .filter((d) => d.value > 0);
+      .filter((d) => d.value > 0)
+      .sort((a, b) => b.value - a.value);
   };
 
   const pillOptions = [
@@ -162,8 +163,6 @@ export default function AdminDashboard() {
     // Helpers
     const count = (pool: typeof leads, status: string) =>
       pool.filter((l) => l.status === status).length;
-    const pct = (n: number, total: number) =>
-      total > 0 ? `${((n / total) * 100).toFixed(1)}%` : "0%";
 
     const grandTotal = leads.length;
 
@@ -200,9 +199,9 @@ export default function AdminDashboard() {
     aoa.push([]);
     aoa.push([]);
 
-    // ── Section B: Employee-wise Breakdown (with % of total) ──
+    // ── Section B: Employee-wise Breakdown ──
     aoa.push(["EMPLOYEE-WISE BREAKDOWN"]);
-    aoa.push(["Employee", "Total Leads", "% of Total", "Open", "On Progress", "Converted", "Lost"]);
+    aoa.push(["Employee", "Total Leads", "Open", "On Progress", "Converted", "Lost"]);
 
     const activeEmployees = employees
       .map((emp) => ({
@@ -215,7 +214,6 @@ export default function AdminDashboard() {
       aoa.push([
         emp.name,
         empLeads.length,
-        pct(empLeads.length, grandTotal),
         count(empLeads, "Open"),
         count(empLeads, "On Progress"),
         count(empLeads, "Converted"),
@@ -227,37 +225,11 @@ export default function AdminDashboard() {
     aoa.push([
       "TOTAL",
       grandTotal,
-      "100%",
       count(leads, "Open"),
       count(leads, "On Progress"),
       count(leads, "Converted"),
       count(leads, "Lost"),
     ]);
-
-    aoa.push([]);
-    aoa.push([]);
-
-    // ── Section C: Per-Employee Detail ──
-    aoa.push(["PER-EMPLOYEE LEAD DETAILS"]);
-
-    activeEmployees.forEach(({ emp, empLeads }) => {
-      // Employee sub-header
-      aoa.push([]);
-      aoa.push([emp.name.toUpperCase(), `Total: ${empLeads.length}`, pct(empLeads.length, grandTotal)]);
-      aoa.push(["Client ID", "Name", "Phone", "Destination", "Tour Category", "Status", "Itinerary Code", "Last Activity"]);
-      empLeads.forEach((l) => {
-        aoa.push([
-          l.client_id ?? "",
-          l.name,
-          l.phone,
-          l.destination ?? "",
-          (l as any).tour_category ?? "",
-          l.status ?? "",
-          l.itinerary_code ?? "",
-          l.last_activity_at ? format(new Date(l.last_activity_at), "MMM d, yyyy") : "",
-        ]);
-      });
-    });
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws["!cols"] = [
