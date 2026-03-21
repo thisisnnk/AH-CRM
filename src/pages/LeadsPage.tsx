@@ -57,7 +57,7 @@ export default function LeadsPage() {
   const [phoneCheckLoading, setPhoneCheckLoading] = useState(false);
 
   const { data: leads = [], isLoading: leadsLoading } = useQuery({
-    queryKey: ["leads", format(fromDate, "yyyy-MM-dd"), format(toDate, "yyyy-MM-dd"), user?.id, role, search],
+    queryKey: ["leads", format(fromDate, "yyyy-MM-dd"), format(toDate, "yyyy-MM-dd"), user?.id, role],
     queryFn: async () => {
       let query = supabase
         .from("leads")
@@ -68,11 +68,6 @@ export default function LeadsPage() {
 
       if (!isAdmin && user) {
         query = query.eq("assigned_employee_id", user.id);
-      }
-
-      if (search.trim()) {
-        const s = search.trim();
-        query = query.or(`name.ilike.%${s}%,phone.ilike.%${s}%,destination.ilike.%${s}%`);
       }
 
       const { data, error } = await query;
@@ -362,6 +357,17 @@ export default function LeadsPage() {
     if (filterSources.length > 0 && !filterSources.includes(l.lead_source ?? "")) return false;
     if (filterAssignedTos.length > 0 && !filterAssignedTos.includes(l.assigned_employee_id ?? "")) return false;
     if (filterStatuses.length > 0 && !filterStatuses.includes((isAdmin ? l.status : l.badge_stage) ?? "")) return false;
+    if (search.trim()) {
+      const s = search.trim().toLowerCase();
+      const matches =
+        (l.name ?? "").toLowerCase().includes(s) ||
+        (l.phone ?? "").toLowerCase().includes(s) ||
+        (l.destination ?? "").toLowerCase().includes(s) ||
+        (l.lead_source ?? "").toLowerCase().includes(s) ||
+        (l.itinerary_code ?? "").toLowerCase().includes(s) ||
+        (l.client_id ?? "").toLowerCase().includes(s);
+      if (!matches) return false;
+    }
     return true;
   });
 
@@ -456,7 +462,7 @@ export default function LeadsPage() {
               <DialogContent className="w-[calc(100vw-2rem)] max-w-lg max-h-[90vh] overflow-y-auto">
                 <DialogHeader><DialogTitle>Create Lead</DialogTitle></DialogHeader>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="col-span-1 sm:col-span-2"><Label>Name *</Label><Input value={newLead.name} onChange={(e) => setNewLead({ ...newLead, name: e.target.value })} /></div>
+                  <div className="col-span-1 sm:col-span-2"><Label>Name</Label><Input value={newLead.name} onChange={(e) => setNewLead({ ...newLead, name: e.target.value })} /></div>
                   <div className="col-span-1 sm:col-span-2">
                     <PhoneInput
                       label="Phone" required
@@ -519,7 +525,7 @@ export default function LeadsPage() {
                     </Select>
                   </div>
                 </div>
-                <Button className="w-full mt-4" onClick={() => createLead.mutate()} disabled={!newLead.name || !isPhoneValid(phoneDialCode, phoneNumber) || !newLead.lead_source || !newLead.assigned_employee_id || createLead.isPending || (waNumber.length > 0 && !isPhoneValid(waDialCode, waNumber))}>
+                <Button className="w-full mt-4" onClick={() => createLead.mutate()} disabled={!isPhoneValid(phoneDialCode, phoneNumber) || !newLead.lead_source || !newLead.assigned_employee_id || createLead.isPending || (waNumber.length > 0 && !isPhoneValid(waDialCode, waNumber))}>
                   {createLead.isPending ? "Creating..." : existingContact ? "Create New Trip" : "Create Lead"}
                 </Button>
               </DialogContent>
