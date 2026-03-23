@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp /tmp/ah-crm-fixes/AuthContext.tsx src/contexts/AuthContext.tsx)",
+      "Bash(cp /tmp/ah-crm-fixes/ProtectedLayout.tsx src/components/ProtectedLayout.tsx)",
+      "Bash(cp /tmp/ah-crm-fixes/LeadsPage.tsx src/pages/LeadsPage.tsx)",
+      "Bash(cp /tmp/ah-crm-fixes/TasksPage.tsx src/pages/TasksPage.tsx)",
+      "Bash(cp /tmp/ah-crm-fixes/LeadsActivityPage.tsx src/pages/LeadsActivityPage.tsx)",
+      "Bash(cp /tmp/ah-crm-fixes/ContactDetailPage.tsx src/pages/ContactDetailPage.tsx)",
+      "Bash(cp /tmp/ah-crm-fixes/useFileUpload.ts src/hooks/useFileUpload.ts)",
+      "Bash(cp /tmp/ah-crm-fixes/uploadToR2.ts src/utils/uploadToR2.ts)",
+      "Bash(cp /tmp/ah-crm-fixes/client.ts src/integrations/supabase/client.ts)",
+      "Bash(cp /tmp/ah-crm-fixes/useAuthReady.ts src/hooks/useAuthReady.ts)"
+    ]
+  }
+}
