@@ -21,6 +21,9 @@ export async function uploadToR2(
   folder: string,
   onProgress: (pct: number) => void
 ): Promise<string> {
+  if (!WORKER_URL) {
+    throw new Error("Upload service is not configured. Contact admin.");
+  }
   const url = new URL(`${WORKER_URL}/upload`);
   url.searchParams.set("folder", folder);
   url.searchParams.set("filename", file.name);

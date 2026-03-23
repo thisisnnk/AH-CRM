@@ -49,17 +49,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
+    let mounted = true;
+
     // 1. Handle the initial session on mount
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!mounted) return;
+
       const currentUser = session?.user ?? null;
       setUser(currentUser);
+      // Mark initial session as handled BEFORE the async fetchUserData call
+      // so that token-refresh events fired during fetchUserData aren't dropped.
+      initialSessionHandled.current = true;
 
       if (currentUser) {
         await fetchUserData(currentUser.id);
       }
 
-      setLoading(false);
-      initialSessionHandled.current = true;
+      if (mounted) setLoading(false);
     });
 
     // 2. Listen for subsequent auth state changes (sign-in, sign-out, token refresh)
@@ -67,6 +73,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Skip if the initial session hasn't been handled yet —
       // getSession() above already covers the initial load.
       if (!initialSessionHandled.current) return;
+      if (!mounted) return;
 
       const currentUser = session?.user ?? null;
       setUser(currentUser);
@@ -78,10 +85,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setProfile(null);
       }
 
-      setLoading(false);
+      if (mounted) setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {

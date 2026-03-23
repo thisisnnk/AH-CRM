@@ -78,7 +78,7 @@ export default function LeadsPage() {
       }
       return data ?? [];
     },
-    enabled: !!user,
+    enabled: !!user && role !== null,
     placeholderData: keepPreviousData,
     retry: 2,
   });
@@ -89,6 +89,7 @@ export default function LeadsPage() {
       const { data } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
       return data ?? [];
     },
+    enabled: !!user,
     staleTime: 5 * 60_000,
   });
 
@@ -164,6 +165,7 @@ export default function LeadsPage() {
 
   const createLead = useMutation({
     mutationFn: async (): Promise<{ isExistingClient: boolean }> => {
+      if (!user) throw new Error("Not authenticated");
       const normalizedPhone = normalizePhone(fullPhone);
 
       // Check if a contact with this phone already exists

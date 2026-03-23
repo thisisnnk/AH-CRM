@@ -48,6 +48,7 @@ export default function LeadsActivityPage() {
       const { data } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
       return data ?? [];
     },
+    enabled: !!user,
     staleTime: 5 * 60_000,
   });
 

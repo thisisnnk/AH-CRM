@@ -12,7 +12,7 @@ import { ArrowLeft, Trash2, ExternalLink } from "lucide-react";
 
 export default function ContactDetailPage() {
   const { id } = useParams();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const isAdmin = role === "admin";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -30,7 +30,7 @@ export default function ContactDetailPage() {
       const { data } = await supabase.from("contacts").select("*").eq("id", id!).single();
       return data;
     },
-    enabled: !!id,
+    enabled: !!id && !!user,
   });
 
   const { data: linkedLeads = [] } = useQuery({
@@ -39,7 +39,7 @@ export default function ContactDetailPage() {
       const { data } = await supabase.from("leads").select("*").eq("contact_id", id!).order("created_at", { ascending: false });
       return data ?? [];
     },
-    enabled: !!id,
+    enabled: !!id && !!user,
   });
 
   // Update contact mutation

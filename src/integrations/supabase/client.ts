@@ -5,16 +5,22 @@ import type { Database } from './types';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
+if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+  throw new Error(
+    "Missing Supabase environment variables. Check VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in your .env file."
+  );
+}
+
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-// Custom fetch with a 12-second timeout so Supabase calls (including auth token
+// Custom fetch with a 15-second timeout so Supabase calls (including auth token
 // refresh) never hang silently on slow mobile connections.
 // Also combines any signal passed by Supabase internals with our timeout signal,
 // so both timeout-abort and Supabase's own abort work correctly.
 const fetchWithTimeout: typeof fetch = (input, init) => {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8_000);
+  const timer = setTimeout(() => controller.abort(), 15_000);
 
   // Combine Supabase's own signal (if any) with our timeout signal so both work.
   let signal: AbortSignal = controller.signal;

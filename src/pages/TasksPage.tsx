@@ -42,6 +42,7 @@ export default function TasksPage() {
       const { data } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
       return data ?? [];
     },
+    enabled: !!user,
     staleTime: 5 * 60_000,
   });
 
@@ -55,6 +56,7 @@ export default function TasksPage() {
         .limit(200);
       return data ?? [];
     },
+    enabled: !!user,
     staleTime: 60_000,
   });
 

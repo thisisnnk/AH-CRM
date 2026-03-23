@@ -1,0 +1,23 @@
+export const queryKeys = {
+  leads: (from: string, to: string, userId: string, role: string) =>
+    ["leads", from, to, userId, role] as const,
+  contacts: () => ["contacts"] as const,
+  employees: () => ["employees-list"] as const,
+  allEmployees: () => ["all-employees"] as const,
+  tasksIncomplete: () => ["tasks-incomplete"] as const,
+  tasksCompleted: () => ["tasks-completed"] as const,
+  myTasks: (userId: string) => ["my-tasks", userId] as const,
+  notifications: (userId: string) => ["notifications", userId] as const,
+  lead: (id: string) => ["lead", id] as const,
+  contact: (id: string) => ["contact", id] as const,
+  revisions: (leadId: string) => ["revisions", leadId] as const,
+  activities: (leadId: string) => ["activities", leadId] as const,
+  leadTasks: (leadId: string) => ["lead-tasks", leadId] as const,
+  leadNotes: (leadId: string) => ["lead-notes", leadId] as const,
+  contactLeads: (contactId: string) => ["contact-leads", contactId] as const,
+  dashboardLeads: (from: string, to: string) => ["dashboard-leads", from, to] as const,
+  myLeads: (userId: string, from: string, to: string) => ["my-leads", userId, from, to] as const,
+  incomingLeads: () => ["incoming-leads"] as const,
+  allActivityLogs: (userId: string, isAdmin: boolean) => ["all-activity-logs", userId, isAdmin] as const,
+  inactiveLeads: () => ["inactive-leads-activity"] as const,
+};

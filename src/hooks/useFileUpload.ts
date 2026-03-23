@@ -29,6 +29,10 @@ export function useFileUpload(_bucket?: string) {
 
     const upload = useCallback(async (folder: string): Promise<string | null> => {
         if (!state.file) return null;
+        if (!WORKER_URL) {
+            setState((s) => ({ ...s, error: "Upload service is not configured. Contact admin." }));
+            return null;
+        }
 
         setState((s) => ({ ...s, uploading: true, progress: 0, error: null }));
 

@@ -16,7 +16,7 @@ function DataPrefetcher() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || role === null) return;
 
     const isAdmin = role === "admin";
 
@@ -43,7 +43,7 @@ function DataPrefetcher() {
     const from = subDays(new Date(), 90);
     const to = new Date();
     queryClient.prefetchQuery({
-      queryKey: ["leads", format(from, "yyyy-MM-dd"), format(to, "yyyy-MM-dd"), user.id, role, ""],
+      queryKey: ["leads", format(from, "yyyy-MM-dd"), format(to, "yyyy-MM-dd"), user.id, role],
       queryFn: async () => {
         let query = supabase
           .from("leads")
