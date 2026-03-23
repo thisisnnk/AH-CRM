@@ -16,7 +16,7 @@ function DataPrefetcher() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
-    if (!user || role === null) return;
+    if (!user) return;
 
     const isAdmin = role === "admin";
 

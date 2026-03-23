@@ -61,7 +61,7 @@ export default function LeadsPage() {
     queryFn: async () => {
       let query = supabase
         .from("leads")
-        .select("id,client_id,enquiry_date,lead_source,itinerary_code,name,phone,destination,trip_duration,assigned_employee_id,travelers,status,badge_stage,last_activity_at,created_at,travel_date,budget")
+        .select("*")
         .gte("created_at", fromDate.toISOString())
         .lte("created_at", endOfDay(toDate).toISOString())
         .order("created_at", { ascending: false });
@@ -78,7 +78,7 @@ export default function LeadsPage() {
       }
       return data ?? [];
     },
-    enabled: !!user && role !== null,
+    enabled: !!user,
     placeholderData: keepPreviousData,
     retry: 2,
   });

@@ -10,7 +10,8 @@
       "Bash(cp /tmp/ah-crm-fixes/useFileUpload.ts src/hooks/useFileUpload.ts)",
       "Bash(cp /tmp/ah-crm-fixes/uploadToR2.ts src/utils/uploadToR2.ts)",
       "Bash(cp /tmp/ah-crm-fixes/client.ts src/integrations/supabase/client.ts)",
-      "Bash(cp /tmp/ah-crm-fixes/useAuthReady.ts src/hooks/useAuthReady.ts)"
+      "Bash(cp /tmp/ah-crm-fixes/useAuthReady.ts src/hooks/useAuthReady.ts)",
+      "Bash(grep -r \"from.*leads\" src/pages/*.tsx)"
     ]
   }
 }
