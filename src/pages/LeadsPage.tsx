@@ -7,10 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
-import { CalendarIcon, Download, Filter, Inbox, Plus, Search, Trash2 } from "lucide-react";
+import { CalendarIcon, Download, Filter, Inbox, Loader2, Plus, Search, Trash2 } from "lucide-react";
 import { exportToExcel } from "@/utils/exportExcel";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
@@ -40,7 +39,22 @@ export default function LeadsPage() {
   const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [inboxOpen, setInboxOpen] = useState(false);
-  const [assignMap, setAssignMap] = useState<Record<string, string>>({});
+  // Incoming leads confirm dialog
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [selectedIncoming, setSelectedIncoming] = useState<any | null>(null);
+  const [contactCheckDone, setContactCheckDone] = useState(false);
+  const [contactCheckLoading, setContactCheckLoading] = useState(false);
+  const [foundContact, setFoundContact] = useState<{ id: string; contact_id: string; name: string; phone: string } | null>(null);
+  const [notesDialogOpen, setNotesDialogOpen] = useState(false);
+  const [selectedNotesLead, setSelectedNotesLead] = useState<any | null>(null);
+
+  const closeConfirmDialog = () => {
+    setConfirmDialogOpen(false);
+    setSelectedIncoming(null);
+    setContactCheckDone(false);
+    setContactCheckLoading(false);
+    setFoundContact(null);
+  };
   const [fromDate, setFromDate] = useState<Date>(subDays(new Date(), 90));
   const [toDate, setToDate] = useState<Date>(new Date());
   const [newLead, setNewLead] = useState({
@@ -96,7 +110,7 @@ export default function LeadsPage() {
   const { data: incomingLeads = [] } = useQuery({
     queryKey: ["incoming-leads"],
     queryFn: async () => {
-      const { data } = await supabase.from("incoming_leads").select("*").eq("status", "Pending").order("created_at", { ascending: false });
+      const { data } = await supabase.from("Incoming_Leads").select("id, created_at, name, phone, email, destination, travel_date, duration, travelers_count, travel_type").order("created_at", { ascending: false });
       return data ?? [];
     },
     enabled: isAdmin,
@@ -319,34 +333,121 @@ export default function LeadsPage() {
     },
   });
 
-  const assignIncoming = useMutation({
-    mutationFn: async ({ incomingId, employeeId, name, phone }: { incomingId: string; employeeId: string; name: string; phone: string }) => {
-      const { error: leadErr } = await supabase.from("leads").insert({
-        name,
-        phone,
-        assigned_employee_id: employeeId,
-        lead_source: "Telegram Bot",
-      });
-      if (leadErr) throw leadErr;
-
-      const { error: updateErr } = await supabase.from("incoming_leads").update({ status: "Assigned" }).eq("id", incomingId);
-      if (updateErr) throw updateErr;
-
-      await sendNotification({
-        recipientId: employeeId,
-        type: "lead_assigned",
-        message: `New lead "${name}" has been assigned to you`,
-      });
+  const deleteIncoming = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("Incoming_Leads").delete().eq("id", id);
+      if (error) throw error;
     },
     onSuccess: () => {
-      toast({ title: "Lead assigned" });
+      toast({ title: "Lead removed" });
       queryClient.invalidateQueries({ queryKey: ["incoming-leads"] });
+    },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const confirmTripOnly = useMutation({
+    mutationFn: async () => {
+      if (!selectedIncoming || !foundContact) throw new Error("Missing data");
+      const il = selectedIncoming;
+      const generatedClientId = await generateClientId();
+
+      await supabase.from("leads").insert({
+        name: il.name,
+        phone: il.phone,
+        whatsapp: il.phone,
+        email: il.email ?? null,
+        destination: il.destination ?? null,
+        travelers: il.travelers_count ? parseInt(String(il.travelers_count)) : null,
+        trip_duration: il.duration ?? null,
+        lead_source: "Telegram Bot",
+        contact_id: foundContact.id,
+        enquiry_date: new Date().toISOString(),
+        status: "Open",
+        badge_stage: "Open",
+        client_id: generatedClientId,
+      });
+
+      await supabase.from("Incoming_Leads").delete().eq("id", il.id);
+    },
+    onSuccess: () => {
+      closeConfirmDialog();
+      toast({ title: "Trip created and linked to existing contact" });
       queryClient.invalidateQueries({ queryKey: ["leads"] });
+      queryClient.invalidateQueries({ queryKey: ["incoming-leads"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
     },
-    onError: (err: any) => {
-      console.error("Assign incoming lead error:", err);
-      toast({ title: "Error assigning lead", description: err.message, variant: "destructive" });
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const confirmTripAndContact = useMutation({
+    mutationFn: async () => {
+      if (!selectedIncoming) throw new Error("Missing data");
+      const il = selectedIncoming;
+      // Generate contact_id in AH-YYYY-MM-NNNN format
+      const generateContactId = async (): Promise<string> => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, "0");
+        const prefix = `AH-${year}-${month}-`;
+
+        const { data: existing } = await supabase
+          .from("contacts")
+          .select("contact_id")
+          .ilike("contact_id", `${prefix}%`)
+          .order("contact_id", { ascending: false })
+          .limit(1);
+
+        const lastNum = existing?.[0]?.contact_id
+          ? parseInt(existing[0].contact_id.split("-").pop() ?? "0", 10)
+          : 0;
+
+        return `${prefix}${String(lastNum + 1).padStart(4, "0")}`;
+      };
+
+      const generatedContactId = await generateContactId();
+
+      const { data: newContact, error: contactErr } = await supabase
+        .from("contacts")
+        .insert({
+          contact_id: generatedContactId,
+          name: il.name,
+          phone: il.phone,
+          whatsapp: il.phone,
+          email: il.email ?? null,
+        })
+        .select("id, contact_id")
+        .single();
+
+      if (contactErr) throw contactErr;
+
+      const generatedClientId = await generateClientId();
+
+      await supabase.from("leads").insert({
+        name: il.name,
+        phone: il.phone,
+        whatsapp: il.phone,
+        email: il.email ?? null,
+        destination: il.destination ?? null,
+        travelers: il.travelers_count ? parseInt(String(il.travelers_count)) : null,
+        trip_duration: il.duration ?? null,
+        lead_source: "Telegram Bot",
+        contact_id: newContact.id,
+        enquiry_date: new Date().toISOString(),
+        status: "Open",
+        badge_stage: "Open",
+        client_id: generatedClientId,
+      });
+
+      await supabase.from("Incoming_Leads").delete().eq("id", il.id);
     },
+    onSuccess: () => {
+      closeConfirmDialog();
+      toast({ title: "Trip and new contact created successfully" });
+      queryClient.invalidateQueries({ queryKey: ["leads"] });
+      queryClient.invalidateQueries({ queryKey: ["incoming-leads"] });
+      queryClient.invalidateQueries({ queryKey: ["contacts"] });
+    },
+    onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
   const statusKeys = isAdmin ? ["Open", "On Progress", "Converted", "Lost"] : ["Open", "Follow Up", "Converted", "Lost"];
@@ -599,43 +700,74 @@ export default function LeadsPage() {
         ))}
       </div>
 
-      {/* Incoming Leads Inbox panel (admin only, toggled) */}
+      {/* Incoming Leads table (admin only, toggled) */}
       {isAdmin && inboxOpen && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Inbox className="h-5 w-5" /> Incoming Leads Inbox</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {incomingLeads.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No pending incoming leads</p>
-            ) : (
-              <div className="space-y-3">
-                {incomingLeads.map((il) => (
-                  <div key={il.id} className="p-4 rounded-lg border flex flex-col md:flex-row md:items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{il.name}</p>
-                      <p className="text-sm text-muted-foreground">{il.phone} · {il.source}</p>
-                      <p className="text-xs text-muted-foreground">{format(new Date(il.created_at!), "MMM d, yyyy HH:mm")}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Select value={assignMap[il.id] ?? ""} onValueChange={(v) => setAssignMap({ ...assignMap, [il.id]: v })}>
-                        <SelectTrigger className="w-40"><SelectValue placeholder="Assign to" /></SelectTrigger>
-                        <SelectContent>{employees.map((e) => <SelectItem key={e.user_id} value={e.user_id}>{e.name}</SelectItem>)}</SelectContent>
-                      </Select>
-                      <Button
-                        size="sm"
-                        disabled={!assignMap[il.id]}
-                        onClick={() => assignIncoming.mutate({ incomingId: il.id, employeeId: assignMap[il.id], name: il.name, phone: il.phone })}
-                      >
-                        Assign
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <div className="overflow-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted sticky top-0 z-10">
+              <tr>
+                <th className="text-center py-3 px-6 whitespace-nowrap">Name</th>
+                <th className="text-center py-3 px-6 whitespace-nowrap">Phone Number</th>
+                <th className="text-center py-3 px-6 whitespace-nowrap">Destination</th>
+                <th className="text-center py-3 px-6 whitespace-nowrap">Duration</th>
+                <th className="text-center py-3 px-6 whitespace-nowrap">Pax</th>
+                <th className="text-center py-3 px-6 whitespace-nowrap">Notes</th>
+                <th className="text-center py-3 px-6 whitespace-nowrap">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {incomingLeads.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="text-center py-10 text-muted-foreground">No pending incoming leads</td>
+                </tr>
+              ) : (
+                incomingLeads.map((il) => {
+                  return (
+                    <tr key={il.id} className="hover:bg-muted/40 transition-colors">
+                      <td className="py-3 px-6 text-center font-medium">{il.name}</td>
+                      <td className="py-3 px-6 text-center">{il.phone}</td>
+                      <td className="py-3 px-6 text-center">{il.destination ?? "—"}</td>
+                      <td className="py-3 px-6 text-center">{il.duration ?? "—"}</td>
+                      <td className="py-3 px-6 text-center">{il.travelers_count ?? "—"}</td>
+                      <td className="py-3 px-6 text-center">
+                        <button
+                          className="text-sm text-primary underline underline-offset-2 hover:text-primary/80 transition-colors cursor-pointer"
+                          onClick={() => {
+                            setSelectedNotesLead(il);
+                            setNotesDialogOpen(true);
+                          }}
+                        >
+                          View Notes
+                        </button>
+                      </td>
+                      <td className="py-3 px-6 text-center">
+                        <div className="flex items-center justify-center gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              setSelectedIncoming(il);
+                              setConfirmDialogOpen(true);
+                            }}
+                          >
+                            Confirm
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={deleteIncoming.isPending}
+                            onClick={() => deleteIncoming.mutate(il.id)}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {/* Search */}
@@ -828,6 +960,167 @@ export default function LeadsPage() {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    <Dialog open={confirmDialogOpen} onOpenChange={(open) => { if (!open) closeConfirmDialog(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Confirm Incoming Lead</DialogTitle>
+        </DialogHeader>
+
+        {selectedIncoming && (() => {
+          return (
+            <div className="space-y-4">
+              {/* Summary card */}
+              <div className="rounded-lg border p-4 bg-muted/40 space-y-1 text-sm">
+                <p><span className="font-medium">Name:</span> {selectedIncoming.name}</p>
+                <p><span className="font-medium">Phone:</span> {selectedIncoming.phone}</p>
+                <p><span className="font-medium">Destination:</span> {selectedIncoming.destination ?? "—"}</p>
+                <p><span className="font-medium">Duration:</span> {selectedIncoming?.duration ?? "—"}</p>
+                <p><span className="font-medium">Pax:</span> {selectedIncoming?.travelers_count ?? "—"}</p>
+              </div>
+
+              {/* Check contact section */}
+              <div className="space-y-3">
+                <p className="text-sm font-medium">Check Existing Contact</p>
+
+                {!contactCheckDone && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    disabled={contactCheckLoading}
+                    onClick={async () => {
+                      setContactCheckLoading(true);
+                      try {
+                        const raw = selectedIncoming.phone.replace(/\D/g, "");
+                        const last10 = raw.slice(-10);
+
+                        // Try exact match first (fastest, uses index if phone is indexed)
+                        const { data: exactMatches, error: exactErr } = await supabase
+                          .from("contacts")
+                          .select("id, contact_id, name, phone")
+                          .eq("phone", selectedIncoming.phone)
+                          .limit(1);
+
+                        if (!exactErr && exactMatches && exactMatches.length > 0) {
+                          setFoundContact(exactMatches[0]);
+                          setContactCheckDone(true);
+                          setContactCheckLoading(false);
+                          return;
+                        }
+
+                        // Fallback: try matching last 10 digits with ilike
+                        const { data: fuzzyMatches, error: fuzzyErr } = await supabase
+                          .from("contacts")
+                          .select("id, contact_id, name, phone")
+                          .ilike("phone", `%${last10}`)
+                          .limit(5);
+
+                        if (!fuzzyErr && fuzzyMatches && fuzzyMatches.length > 0) {
+                          setFoundContact(fuzzyMatches[0]);
+                        } else {
+                          setFoundContact(null);
+                        }
+                      } catch (err) {
+                        console.error("Contact check error:", err);
+                        setFoundContact(null);
+                      } finally {
+                        setContactCheckDone(true);
+                        setContactCheckLoading(false);
+                      }
+                    }}
+                  >
+                    {contactCheckLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+                    Check if contact exists
+                  </Button>
+                )}
+
+                {contactCheckDone && foundContact && (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-green-500/30 bg-green-50 dark:bg-green-950/20 p-3 text-sm space-y-1">
+                      <p className="font-medium text-green-700 dark:text-green-400">Existing contact found</p>
+                      <p><span className="font-medium">Name:</span> {foundContact.name}</p>
+                      <p><span className="font-medium">Contact ID:</span> {foundContact.contact_id}</p>
+                      <p><span className="font-medium">Phone:</span> {foundContact.phone}</p>
+                    </div>
+                    <Button
+                      className="w-full"
+                      disabled={confirmTripOnly.isPending}
+                      onClick={() => confirmTripOnly.mutate()}
+                    >
+                      {confirmTripOnly.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                      Create New Trip for Existing Contact
+                    </Button>
+                  </div>
+                )}
+
+                {contactCheckDone && !foundContact && (
+                  <div className="space-y-3">
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm">
+                      <p className="font-medium text-amber-700 dark:text-amber-400">No existing contact found</p>
+                      <p className="text-muted-foreground mt-1">A new contact will be created automatically.</p>
+                    </div>
+                    <Button
+                      className="w-full"
+                      disabled={confirmTripAndContact.isPending}
+                      onClick={() => confirmTripAndContact.mutate()}
+                    >
+                      {confirmTripAndContact.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                      Create New Trip & Contact
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={notesDialogOpen} onOpenChange={(open) => { if (!open) { setNotesDialogOpen(false); setSelectedNotesLead(null); } }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Lead Notes</DialogTitle>
+        </DialogHeader>
+        {selectedNotesLead && (
+          <div className="space-y-3 text-sm">
+            <div className="rounded-lg border bg-muted/40 p-4 space-y-2">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground font-medium">Name</span>
+                <span className="font-medium">{selectedNotesLead.name}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground font-medium">Phone</span>
+                <span>{selectedNotesLead.phone}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground font-medium">Email</span>
+                <span>{selectedNotesLead.email ?? "—"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground font-medium">Destination</span>
+                <span>{selectedNotesLead.destination ?? "—"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground font-medium">Travel Date</span>
+                <span>{selectedNotesLead.travel_date ?? "—"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground font-medium">Duration</span>
+                <span>{selectedNotesLead.duration ?? "—"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground font-medium">Travelers</span>
+                <span>{selectedNotesLead.travelers_count ?? "—"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground font-medium">Travel Type</span>
+                <span>{selectedNotesLead.travel_type ?? "—"}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
     </>
   );
 }
