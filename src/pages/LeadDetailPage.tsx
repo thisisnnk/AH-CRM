@@ -646,7 +646,7 @@ export default function LeadDetailPage() {
   const savePersonal = () => {
     setIsSavingPersonal(true);
     updateLead.mutate(
-      { name: personalForm.name, phone: personalForm.phone, whatsapp: personalForm.whatsapp || null, email: personalForm.email || null, city: personalForm.city || null, state: personalForm.state || null, country: personalForm.country || null },
+      { name: personalForm.name, phone: personalForm.phone, whatsapp: personalForm.whatsapp || null, email: personalForm.email || null, city: personalForm.city || null, state: personalForm.state || null, country: personalForm.country || null, _logAction: "Contact details updated" },
       {
         onSuccess: () => { setIsEditingPersonal(false); setIsSavingPersonal(false); },
         onError: () => setIsSavingPersonal(false),
@@ -674,9 +674,11 @@ export default function LeadDetailPage() {
     if (leadInfoForm.status === "Lost" || leadInfoForm.status === "Converted") {
       updates.badge_stage = leadInfoForm.status;
     }
+    updates.last_activity_at = new Date().toISOString();
     if (lead && leadInfoForm.status !== lead.status) {
-      updates._logAction = `Changed status to ${leadInfoForm.status}`;
-      updates.last_activity_at = new Date().toISOString();
+      updates._logAction = `Status changed to ${leadInfoForm.status}`;
+    } else {
+      updates._logAction = "Lead info updated";
     }
 
     updateLead.mutate(updates, {

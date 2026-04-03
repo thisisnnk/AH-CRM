@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
 const adminNav = [
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Leads", url: "/leads", icon: Users },
   { title: "Leads Activity", url: "/leads-activity", icon: Activity },
   { title: "Contacts", url: "/contacts", icon: Contact },
@@ -43,6 +44,7 @@ const adminNav = [
 ];
 
 const employeeNav = [
+  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Leads", url: "/leads", icon: Users },
   { title: "Leads Activity", url: "/leads-activity", icon: Activity },
   { title: "Tasks", url: "/my-tasks", icon: CheckSquare },

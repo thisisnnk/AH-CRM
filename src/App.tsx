@@ -48,7 +48,7 @@ function RootRedirect() {
   if (role === "execution") return <Navigate to="/execution" replace />;
   if (role === "accounts") return <Navigate to="/general-ledger" replace />;
   if (role === "itinerary") return <Navigate to="/itineraries" replace />;
-  return <Navigate to="/leads" replace />;
+  return <Navigate to="/dashboard" replace />;
 }
 
 const App = () => (
@@ -64,7 +64,7 @@ const App = () => (
 
             {/* Protected routes */}
             <Route element={<ProtectedLayout />}>
-              <Route path="/dashboard" element={<RootRedirect />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
               <Route path="/leads" element={<LeadsPage />} />
               <Route path="/leads/:id" element={<LeadDetailPage />} />
               <Route path="/leads-activity" element={<LeadsActivityPage />} />
