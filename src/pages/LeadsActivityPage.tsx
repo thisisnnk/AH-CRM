@@ -189,7 +189,6 @@ export default function LeadsActivityPage() {
     },
     enabled: !!user,
     retry: 2,
-    retry: 2,
   });
 
   // ── Realtime subscription: refresh activity table on any insert ──
