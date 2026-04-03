@@ -68,14 +68,16 @@ export default function EmployeeTasksPage() {
     queryKey: ["my-tasks", user?.id],
     queryFn: async () => {
       if (!user) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("tasks")
         .select("*, leads(name, client_id, itinerary_code)")
         .eq("assigned_employee_id", user.id)
         .order("follow_up_date", { ascending: true });
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
     refetchOnMount: "always",
     staleTime: 30_000,
   });

@@ -54,29 +54,33 @@ export default function EmployeeDashboard() {
     queryKey: ["my-leads", user?.id, format(fromDate, "yyyy-MM-dd"), format(toDate, "yyyy-MM-dd")],
     queryFn: async () => {
       if (!user) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("leads")
         .select("*")
         .eq("assigned_employee_id", user.id)
         .gte("created_at", fromDate.toISOString())
         .lte("created_at", endOfDay(toDate).toISOString());
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
   });
 
   const { data: tasks = [] } = useQuery({
     queryKey: ["my-tasks", user?.id],
     queryFn: async () => {
       if (!user) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("tasks")
         .select("*, leads(name, client_id, itinerary_code)")
         .eq("assigned_employee_id", user.id)
         .order("follow_up_date", { ascending: true });
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
   });
 
   // Auto-upload as soon as a file is selected — no separate "Upload File" step needed

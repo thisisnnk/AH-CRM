@@ -37,26 +37,13 @@ export function useFileUpload(_bucket?: string) {
         setState((s) => ({ ...s, uploading: true, progress: 0, error: null }));
 
         try {
-            // Step 1: Get a presigned PUT URL from the Cloudflare Worker
-            const resp = await fetch(`${WORKER_URL}/upload-url`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    filename: state.file.name,
-                    contentType: state.file.type || "application/octet-stream",
-                    folder,
-                }),
-            });
+            // POST directly to the worker's /upload endpoint with XHR for progress events.
+            // The worker accepts the raw file body and reads folder/filename from query params.
+            const url = new URL(`${WORKER_URL}/upload`);
+            url.searchParams.set("folder", folder);
+            url.searchParams.set("filename", state.file.name);
 
-            if (!resp.ok) {
-                const err = await resp.json().catch(() => ({ error: "Worker error" }));
-                throw new Error(err.error ?? "Failed to get upload URL");
-            }
-
-            const { presignedUrl, publicUrl } = await resp.json();
-
-            // Step 2: Upload directly to R2 using XHR for real progress events
-            await new Promise<void>((resolve, reject) => {
+            const publicUrl = await new Promise<string>((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
 
                 xhr.upload.addEventListener("progress", (e) => {
@@ -68,7 +55,16 @@ export function useFileUpload(_bucket?: string) {
 
                 xhr.addEventListener("load", () => {
                     if (xhr.status >= 200 && xhr.status < 300) {
-                        resolve();
+                        try {
+                            const json = JSON.parse(xhr.responseText);
+                            if (json.publicUrl) {
+                                resolve(json.publicUrl);
+                            } else {
+                                reject(new Error(json.error ?? "Worker returned no URL"));
+                            }
+                        } catch {
+                            reject(new Error("Invalid response from upload worker"));
+                        }
                     } else {
                         reject(new Error(`Upload failed: ${xhr.status} ${xhr.statusText}`));
                     }
@@ -77,7 +73,7 @@ export function useFileUpload(_bucket?: string) {
                 xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
                 xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
 
-                xhr.open("PUT", presignedUrl);
+                xhr.open("POST", url.toString());
                 xhr.setRequestHeader("Content-Type", state.file!.type || "application/octet-stream");
                 xhr.send(state.file);
             });

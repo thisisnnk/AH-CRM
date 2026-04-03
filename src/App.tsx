@@ -16,15 +16,19 @@ import NotificationsPage from "./pages/NotificationsPage";
 import NotFound from "./pages/NotFound";
 import LeadsActivityPage from "./pages/LeadsActivityPage";
 import EmployeeTasksPage from "./pages/EmployeeTasksPage";
-import { ProtectedLayout, AdminRoute } from "./components/ProtectedLayout";
+import ExecutionPage from "./pages/ExecutionPage";
+import ExecutionRespondPage from "./pages/ExecutionRespondPage";
+import ItinerariesPage from "./pages/ItinerariesPage";
+import GeneralLedgerPage from "./pages/GeneralLedgerPage";
+import { ProtectedLayout, AdminRoute, ExecutionRoute, ItineraryRoute, AccountsRoute } from "./components/ProtectedLayout";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 0,                // always treat data as stale → always refetch on mount
       gcTime: 5 * 60_000,          // keep unused data in memory for 5 min
-      retry: 1,
-      retryDelay: 0,               // retry immediately (no delay) after a timeout/error
+      retry: 2,
+      retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
       refetchOnMount: true,
       refetchOnWindowFocus: true,  // refetch when user returns to the tab
     },
@@ -32,7 +36,7 @@ const queryClient = new QueryClient({
 });
 
 function RootRedirect() {
-  const { user, loading } = useAuth();
+  const { user, role, loading } = useAuth();
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -40,7 +44,11 @@ function RootRedirect() {
       </div>
     );
   }
-  return user ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (role === "execution") return <Navigate to="/execution" replace />;
+  if (role === "accounts") return <Navigate to="/general-ledger" replace />;
+  if (role === "itinerary") return <Navigate to="/itineraries" replace />;
+  return <Navigate to="/leads" replace />;
 }
 
 const App = () => (
@@ -56,7 +64,7 @@ const App = () => (
 
             {/* Protected routes */}
             <Route element={<ProtectedLayout />}>
-              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/dashboard" element={<RootRedirect />} />
               <Route path="/leads" element={<LeadsPage />} />
               <Route path="/leads/:id" element={<LeadDetailPage />} />
               <Route path="/leads-activity" element={<LeadsActivityPage />} />
@@ -64,6 +72,22 @@ const App = () => (
               <Route path="/contacts/:id" element={<ContactDetailPage />} />
               <Route path="/notifications" element={<NotificationsPage />} />
               <Route path="/my-tasks" element={<EmployeeTasksPage />} />
+
+              {/* Execution team */}
+              <Route element={<ExecutionRoute />}>
+                <Route path="/execution" element={<ExecutionPage />} />
+                <Route path="/execution/respond/:requestId" element={<ExecutionRespondPage />} />
+              </Route>
+
+              {/* Itinerary team */}
+              <Route element={<ItineraryRoute />}>
+                <Route path="/itineraries" element={<ItinerariesPage />} />
+              </Route>
+
+              {/* Accounts team */}
+              <Route element={<AccountsRoute />}>
+                <Route path="/general-ledger" element={<GeneralLedgerPage />} />
+              </Route>
 
               {/* Admin only */}
               <Route element={<AdminRoute />}>

@@ -14,13 +14,15 @@ if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-// Custom fetch with a 15-second timeout so Supabase calls (including auth token
-// refresh) never hang silently on slow mobile connections.
-// Also combines any signal passed by Supabase internals with our timeout signal,
-// so both timeout-abort and Supabase's own abort work correctly.
+// Custom fetch wrapper that applies timeouts to Supabase calls.
+// Auth/token-refresh endpoints get 60 s — on Indian mobile networks the refresh
+// can take several seconds, and killing it silently breaks subsequent mutations.
+// All other data calls get 20 s.
 const fetchWithTimeout: typeof fetch = (input, init) => {
+  const url = typeof input === "string" ? input : input instanceof Request ? input.url : "";
+  const isAuthRequest = url.includes("/auth/");
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15_000);
+  const timer = setTimeout(() => controller.abort(), isAuthRequest ? 60_000 : 20_000);
 
   // Combine Supabase's own signal (if any) with our timeout signal so both work.
   let signal: AbortSignal = controller.signal;

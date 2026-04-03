@@ -27,19 +27,23 @@ export default function ContactDetailPage() {
   const { data: contact } = useQuery({
     queryKey: ["contact", id],
     queryFn: async () => {
-      const { data } = await supabase.from("contacts").select("*").eq("id", id!).single();
+      const { data, error } = await supabase.from("contacts").select("*").eq("id", id!).single();
+      if (error) throw error;
       return data;
     },
     enabled: !!id && !!user,
+    retry: 2,
   });
 
   const { data: linkedLeads = [] } = useQuery({
     queryKey: ["contact-leads", id],
     queryFn: async () => {
-      const { data } = await supabase.from("leads").select("*").eq("contact_id", id!).order("created_at", { ascending: false });
+      const { data, error } = await supabase.from("leads").select("*").eq("contact_id", id!).order("created_at", { ascending: false });
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!id && !!user,
+    retry: 2,
   });
 
   // Update contact mutation

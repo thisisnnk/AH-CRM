@@ -14,6 +14,216 @@ export type Database = {
   }
   public: {
     Tables: {
+      quotation_requests: {
+        Row: {
+          id: string
+          lead_id: string
+          version: number
+          trip_details: Json
+          client_preferences: string | null
+          required_services: string[] | null
+          status: string
+          created_by: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          lead_id: string
+          version?: number
+          trip_details?: Json
+          client_preferences?: string | null
+          required_services?: string[] | null
+          status?: string
+          created_by: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          lead_id?: string
+          version?: number
+          trip_details?: Json
+          client_preferences?: string | null
+          required_services?: string[] | null
+          status?: string
+          created_by?: string
+          created_at?: string | null
+        }
+        Relationships: []
+      }
+      quotations: {
+        Row: {
+          id: string
+          request_id: string
+          version: number
+          pricing_data: Json
+          total_cost: number | null
+          notes: string | null
+          created_by: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          request_id: string
+          version?: number
+          pricing_data?: Json
+          total_cost?: number | null
+          notes?: string | null
+          created_by: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          request_id?: string
+          version?: number
+          pricing_data?: Json
+          total_cost?: number | null
+          notes?: string | null
+          created_by?: string
+          created_at?: string | null
+        }
+        Relationships: []
+      }
+      itineraries: {
+        Row: {
+          id: string
+          lead_id: string
+          version: number
+          file_url: string | null
+          file_type: string | null
+          external_link: string | null
+          notes: string | null
+          created_by: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          lead_id: string
+          version?: number
+          file_url?: string | null
+          file_type?: string | null
+          external_link?: string | null
+          notes?: string | null
+          created_by: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          lead_id?: string
+          version?: number
+          file_url?: string | null
+          file_type?: string | null
+          external_link?: string | null
+          notes?: string | null
+          created_by?: string
+          created_at?: string | null
+        }
+        Relationships: []
+      }
+      client_transactions: {
+        Row: {
+          id: string
+          lead_id: string
+          title: string
+          amount: number
+          payment_mode: string
+          proof_url: string | null
+          bill_url: string | null
+          notes: string | null
+          created_by: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          lead_id: string
+          title: string
+          amount: number
+          payment_mode: string
+          proof_url?: string | null
+          bill_url?: string | null
+          notes?: string | null
+          created_by: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          lead_id?: string
+          title?: string
+          amount?: number
+          payment_mode?: string
+          proof_url?: string | null
+          bill_url?: string | null
+          notes?: string | null
+          created_by?: string
+          created_at?: string | null
+        }
+        Relationships: []
+      }
+      cost_categories: {
+        Row: {
+          id: string
+          lead_id: string
+          category_name: string
+          planned_cost: number
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          lead_id: string
+          category_name: string
+          planned_cost?: number
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          lead_id?: string
+          category_name?: string
+          planned_cost?: number
+          created_at?: string | null
+        }
+        Relationships: []
+      }
+      vendor_transactions: {
+        Row: {
+          id: string
+          category_id: string
+          lead_id: string
+          title: string
+          amount: number
+          payment_mode: string
+          proof_url: string | null
+          bill_url: string | null
+          notes: string | null
+          created_by: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          category_id: string
+          lead_id: string
+          title: string
+          amount: number
+          payment_mode: string
+          proof_url?: string | null
+          bill_url?: string | null
+          notes?: string | null
+          created_by: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          category_id?: string
+          lead_id?: string
+          title?: string
+          amount?: number
+          payment_mode?: string
+          proof_url?: string | null
+          bill_url?: string | null
+          notes?: string | null
+          created_by?: string
+          created_at?: string | null
+        }
+        Relationships: []
+      }
       activity_logs: {
         Row: {
           action: string
@@ -23,6 +233,9 @@ export type Database = {
           proof_url: string | null
           timestamp: string | null
           user_id: string
+          user_role: string | null
+          entity_type: string | null
+          entity_id: string | null
         }
         Insert: {
           action: string
@@ -32,6 +245,9 @@ export type Database = {
           proof_url?: string | null
           timestamp?: string | null
           user_id: string
+          user_role?: string | null
+          entity_type?: string | null
+          entity_id?: string | null
         }
         Update: {
           action?: string
@@ -41,6 +257,9 @@ export type Database = {
           proof_url?: string | null
           timestamp?: string | null
           user_id?: string
+          user_role?: string | null
+          entity_type?: string | null
+          entity_id?: string | null
         }
         Relationships: [
           {
@@ -142,6 +361,7 @@ export type Database = {
           phone: string
           state: string | null
           status: string | null
+          total_expected: number | null
           tour_category: string | null
           travel_date: string | null
           travelers: number | null
@@ -169,6 +389,7 @@ export type Database = {
           phone: string
           state?: string | null
           status?: string | null
+          total_expected?: number | null
           tour_category?: string | null
           travel_date?: string | null
           travelers?: number | null
@@ -196,6 +417,7 @@ export type Database = {
           phone?: string
           state?: string | null
           status?: string | null
+          total_expected?: number | null
           tour_category?: string | null
           travel_date?: string | null
           travelers?: number | null
@@ -457,9 +679,13 @@ export type Database = {
         }
         Returns: boolean
       }
+      delete_quotation_request: {
+        Args: { p_request_id: string }
+        Returns: void
+      }
     }
     Enums: {
-      app_role: "admin" | "employee"
+      app_role: "admin" | "employee" | "execution" | "accounts" | "itinerary"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -587,7 +813,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "employee"],
+      app_role: ["admin", "employee", "execution", "accounts", "itinerary"],
     },
   },
 } as const

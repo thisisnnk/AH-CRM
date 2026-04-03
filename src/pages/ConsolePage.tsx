@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
 import { Plus, Edit, UserX, UserCheck, Phone, Mail, User, Calendar, Shield, KeyRound } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
 import { Separator } from "@/components/ui/separator";
@@ -21,7 +22,7 @@ export default function ConsolePage() {
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
-  const [form, setForm] = useState({ name: "", email: "", password: "", whatsapp: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", whatsapp: "", role: "employee" });
 
   const { data: employees = [], isLoading: employeesLoading } = useQuery({
     queryKey: ["all-employees"],
@@ -42,8 +43,11 @@ export default function ConsolePage() {
 
   const createEmployee = useMutation({
     mutationFn: async () => {
+      // Step 1 — capture admin tokens before signUp hijacks the session
       const { data: { session: adminSession } } = await supabase.auth.getSession();
+      if (!adminSession) throw new Error("Admin session not found. Please refresh and try again.");
 
+      // Step 2 — create the auth user (Supabase auto-signs in as the new user here)
       const { data: authData, error: authErr } = await supabase.auth.signUp({
         email: form.email,
         password: form.password,
@@ -52,23 +56,26 @@ export default function ConsolePage() {
       if (authErr) throw authErr;
       if (!authData.user) throw new Error("Failed to create user");
 
-      if (adminSession) {
-        await supabase.auth.setSession({
-          access_token: adminSession.access_token,
-          refresh_token: adminSession.refresh_token,
-        });
-      }
+      // Step 3 — restore admin session
+      await supabase.auth.setSession({
+        access_token: adminSession.access_token,
+        refresh_token: adminSession.refresh_token,
+      });
 
-      const { error: profileErr } = await supabase.from("profiles").update({ whatsapp: form.whatsapp, name: form.name }).eq("user_id", authData.user.id);
-      if (profileErr) throw profileErr;
-
-      const { error: roleErr } = await supabase.from("user_roles").insert({ user_id: authData.user.id, role: "employee" });
-      if (roleErr) throw roleErr;
+      // Step 4 — use SECURITY DEFINER RPC so role/profile writes are guaranteed
+      // to succeed regardless of session timing issues
+      const { error: rpcErr } = await supabase.rpc("admin_set_user_role", {
+        p_user_id: authData.user.id,
+        p_role: form.role,
+        p_name: form.name,
+        p_whatsapp: form.whatsapp || null,
+      });
+      if (rpcErr) throw rpcErr;
     },
     onSuccess: () => {
-      toast({ title: "Employee created successfully" });
+      toast({ title: "User created successfully" });
       setDialogOpen(false);
-      setForm({ name: "", email: "", password: "", whatsapp: "" });
+      setForm({ name: "", email: "", password: "", whatsapp: "", role: "employee" });
       queryClient.invalidateQueries({ queryKey: ["all-employees"] });
     },
     onError: (err: any) => {
@@ -110,9 +117,9 @@ export default function ConsolePage() {
       if (error) throw error;
     },
     onSuccess: () => {
-      toast({ title: "Employee updated successfully" });
+      toast({ title: "User updated successfully" });
       setEditingUser(null);
-      setForm({ name: "", email: "", password: "", whatsapp: "" });
+      setForm({ name: "", email: "", password: "", whatsapp: "", role: "employee" });
       queryClient.invalidateQueries({ queryKey: ["all-employees"] });
     },
     onError: (err: any) => {
@@ -146,28 +153,43 @@ export default function ConsolePage() {
         <div>
           <h1 className="text-2xl font-bold">Console</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {employees.length} employee{employees.length !== 1 ? "s" : ""} &nbsp;·&nbsp;
+            {employees.length} user{employees.length !== 1 ? "s" : ""} &nbsp;·&nbsp;
             <span className="text-success">{activeCount} active</span>
             {inactiveCount > 0 && <span className="text-destructive"> · {inactiveCount} deactivated</span>}
           </p>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
-            <Button onClick={() => { setEditingUser(null); setForm({ name: "", email: "", password: "", whatsapp: "" }); }}>
-              <Plus className="h-4 w-4 mr-2" /> Create Employee
+            <Button onClick={() => { setEditingUser(null); setForm({ name: "", email: "", password: "", whatsapp: "", role: "employee" }); }}>
+              <Plus className="h-4 w-4 mr-2" /> Create User
             </Button>
           </DialogTrigger>
           <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
             <DialogHeader>
-              <DialogTitle>Create New Employee</DialogTitle>
+              <DialogTitle>Create New User</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 pt-2">
               <div><Label>Full Name</Label><Input className="mt-1" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
               <div><Label>Email</Label><Input className="mt-1" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></div>
               <div><Label>Password</Label><Input className="mt-1" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></div>
               <div><Label>WhatsApp Number</Label><Input className="mt-1" value={form.whatsapp} onChange={(e) => setForm({ ...form, whatsapp: e.target.value })} placeholder="+91..." /></div>
+              <div>
+                <Label>Role</Label>
+                <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="employee">Employee (Sales)</SelectItem>
+                    <SelectItem value="execution">Execution</SelectItem>
+                    <SelectItem value="accounts">Accounts</SelectItem>
+                    <SelectItem value="itinerary">Itinerary</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <Button className="w-full" onClick={() => createEmployee.mutate()} disabled={createEmployee.isPending}>
-                {createEmployee.isPending ? "Creating..." : "Create Employee"}
+                {createEmployee.isPending ? "Creating..." : "Create User"}
               </Button>
             </div>
           </DialogContent>
@@ -253,7 +275,7 @@ export default function ConsolePage() {
                           title="Edit employee"
                           onClick={() => {
                             setEditingUser(emp);
-                            setForm({ name: emp.name, email: emp.email, password: "", whatsapp: emp.whatsapp ?? "" });
+                            setForm({ name: emp.name, email: emp.email, password: "", whatsapp: emp.whatsapp ?? "", role: emp.role ?? "employee" });
                           }}
                         >
                           <Edit className="h-4 w-4" />
@@ -287,7 +309,7 @@ export default function ConsolePage() {
                 <div className="flex items-center gap-2 text-sm">
                   <Shield className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                   <span className="text-muted-foreground capitalize">
-                    {isSuperAdmin ? "Super Admin" : isAdmin ? "Admin" : "Employee"}
+                    {isSuperAdmin ? "Super Admin" : emp.role === "admin" ? "Admin" : emp.role === "execution" ? "Execution" : emp.role === "accounts" ? "Accounts" : emp.role === "itinerary" ? "Itinerary" : "Employee"}
                   </span>
                 </div>
                 {emp.created_at && (
@@ -309,7 +331,7 @@ export default function ConsolePage() {
       )}
       {!employeesLoading && employees.length === 0 && (
         <div className="text-center py-16 text-muted-foreground">
-          No employees yet. Click "Create Employee" to add one.
+          No users yet. Click "Create User" to add one.
         </div>
       )}
     </div>

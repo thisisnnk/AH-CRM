@@ -16,7 +16,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { sendNotification } from "@/utils/notificationHelper";
+import { logActivity } from "@/utils/activityLogger";
 import { uploadToR2 } from "@/utils/uploadToR2";
+import { QuotationTab } from "@/components/quotation/QuotationTab";
+import { TripPaymentsTab } from "@/components/payments/TripPaymentsTab";
+import { ConversionDialog } from "@/components/payments/ConversionDialog";
+import { ItineraryTab } from "@/components/itinerary/ItineraryTab";
 
 // ── File Upload Widget ─────────────────────────────────────────
 function FileUploadWidget({
@@ -164,6 +169,10 @@ export default function LeadDetailPage() {
   const [revSubmitError, setRevSubmitError] = useState<string | null>(null);
   const [taskSubmitError, setTaskSubmitError] = useState<string | null>(null);
 
+  // Conversion dialog state
+  const [conversionDialogOpen, setConversionDialogOpen] = useState(false);
+  const [pendingConvertUpdates, setPendingConvertUpdates] = useState<Record<string, any> | null>(null);
+
   // Edit mode state
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
   const [isSavingPersonal, setIsSavingPersonal] = useState(false);
@@ -181,10 +190,12 @@ export default function LeadDetailPage() {
   const { data: lead, isLoading: leadLoading } = useQuery({
     queryKey: ["lead", id],
     queryFn: async () => {
-      const { data } = await supabase.from("leads").select("*").eq("id", id!).single();
+      const { data, error } = await supabase.from("leads").select("*").eq("id", id!).single();
+      if (error) throw error;
       return data;
     },
     enabled: !!id && !!user,
+    retry: 2,
     // Show partial data from the leads-list cache immediately so the page
     // renders at once while the full detail fetch runs in the background.
     placeholderData: () => {
@@ -201,52 +212,64 @@ export default function LeadDetailPage() {
   const { data: revisions = [] } = useQuery({
     queryKey: ["revisions", id],
     queryFn: async () => {
-      const { data } = await supabase.from("revisions").select("*").eq("lead_id", id!).order("revision_number", { ascending: true });
+      const { data, error } = await supabase.from("revisions").select("*").eq("lead_id", id!).order("revision_number", { ascending: true });
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!id && !!user,
+    retry: 2,
   });
 
   const { data: activities = [] } = useQuery({
     queryKey: ["activities", id],
     queryFn: async () => {
-      const { data } = await supabase.from("activity_logs").select("*").eq("lead_id", id!).order("timestamp", { ascending: false });
+      const { data, error } = await supabase.from("activity_logs").select("*").eq("lead_id", id!).order("timestamp", { ascending: false });
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!id && !!user,
+    retry: 2,
   });
 
   const { data: tasks = [] } = useQuery({
     queryKey: ["lead-tasks", id],
     queryFn: async () => {
-      const { data } = await supabase.from("tasks").select("*").eq("lead_id", id!).order("created_at", { ascending: false });
+      const { data, error } = await supabase.from("tasks").select("*").eq("lead_id", id!).order("created_at", { ascending: false });
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!id && !!user,
+    retry: 2,
   });
 
   const { data: leadNotes = [] } = useQuery({
     queryKey: ["lead-notes", id],
     queryFn: async () => {
-      const { data } = await (supabase as any).from("lead_notes").select("*").eq("lead_id", id!).order("created_at", { ascending: false });
+      const { data, error } = await (supabase as any).from("lead_notes").select("*").eq("lead_id", id!).order("created_at", { ascending: false });
+      if (error) throw error;
       return (data ?? []) as any[];
     },
     enabled: !!id && !!user,
+    retry: 2,
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ["employees-list"],
     queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
+      const { data, error } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
   });
 
   // True only when an actual itinerary file has been uploaded and sent — NOT just because a code was typed
   const hasActualItinerary = revisions.some((r) => r.itinerary_link && r.send_status === "Sent");
   const hasItinerary = hasActualItinerary;
-  const availableStatuses = hasItinerary ? ["Open", "On Progress", "Lost", "Converted"] : ["Open", "Lost", "Converted"];
+  const availableStatuses = hasItinerary
+    ? ["Open", "On Progress", "Quoted", "Lost", "Converted"]
+    : ["Open", "Quoted", "Lost", "Converted"];
 
 
   // ── Pre-populate task assignee from lead's assigned employee ──
@@ -264,8 +287,9 @@ export default function LeadDetailPage() {
       const { error } = await supabase.from("leads").update(dbUpdates).eq("id", id!);
       if (error) throw error;
       if (_logAction && user) {
-        await supabase.from("activity_logs").insert({
-          lead_id: id!, user_id: user.id, action: _logAction,
+        await logActivity({
+          leadId: id!, userId: user.id, userRole: role,
+          action: _logAction, entityType: "leads", entityId: id!,
         });
       }
     },
@@ -317,13 +341,13 @@ export default function LeadDetailPage() {
         last_activity_at: new Date().toISOString(),
       }).eq("id", id!);
 
-      try {
-        await supabase.from("activity_logs").insert({
-          lead_id: id!, user_id: user.id, action: "Submitted itinerary",
-          details: "Itinerary uploaded",
-          proof_url: url,
-        });
-      } catch { /* non-fatal */ }
+      await logActivity({
+        leadId: id!, userId: user.id, userRole: role,
+        action: "Itinerary submitted",
+        details: `Itinerary file uploaded`,
+        proofUrl: url,
+        entityType: "revisions",
+      });
     },
     onSuccess: () => {
       setItinerarySubmitError(null);
@@ -369,14 +393,13 @@ export default function LeadDetailPage() {
         : revForm.type === "Call Recording" ? "Call recording uploaded"
           : `Revised itinerary uploaded`;
 
-      try {
-        await supabase.from("activity_logs").insert({
-          lead_id: id!, user_id: user.id,
-          action: `Added Revision ${nextNum} — ${revForm.type}`,
-          details: details,
-          proof_url: fileUrl,
-        });
-      } catch { /* non-fatal */ }
+      await logActivity({
+        leadId: id!, userId: user.id, userRole: role,
+        action: `Revision ${nextNum} added — ${revForm.type}`,
+        details: details,
+        proofUrl: fileUrl,
+        entityType: "revisions",
+      });
     },
     onSuccess: () => {
       setRevSubmitError(null);
@@ -414,12 +437,13 @@ export default function LeadDetailPage() {
       if (error) throw error;
       if (!inserted || inserted.length === 0) throw new Error("Permission denied: your account cannot create tasks. Please contact admin.");
 
-      try {
-        await supabase.from("activity_logs").insert({
-          lead_id: id!, user_id: user.id, action: "Created task",
-          details: `${senderName} created a task for ${receiverName}`,
-        });
-      } catch { /* non-fatal */ }
+      await logActivity({
+        leadId: id!, userId: user.id, userRole: role,
+        action: "Task created",
+        details: `${senderName} created a task for ${receiverName}: ${taskDescription}`,
+        entityType: "tasks",
+        entityId: inserted[0]?.id ?? undefined,
+      });
 
       if (assignedTo !== user.id) {
         try {
@@ -458,13 +482,14 @@ export default function LeadDetailPage() {
         completed_at: new Date().toISOString(),
       }).eq("id", proofTaskId);
       if (error) throw error;
-      try {
-        await supabase.from("activity_logs").insert({
-          lead_id: id!, user_id: user.id, action: "Task proof uploaded",
-          details: "Task proof uploaded",
-          proof_url: url,
-        });
-      } catch { /* non-fatal */ }
+      await logActivity({
+        leadId: id!, userId: user.id, userRole: role,
+        action: "Task proof submitted",
+        details: "Task marked as completed with proof",
+        proofUrl: url,
+        entityType: "tasks",
+        entityId: proofTaskId,
+      });
     },
     onSuccess: () => {
       toast({ title: "Proof submitted", description: "Task marked as completed." });
@@ -489,13 +514,12 @@ export default function LeadDetailPage() {
       if (count === 0) throw new Error("Could not delete revision. Check Supabase RLS policies.");
       if (user && id) {
         const userName = employees.find((e) => e.user_id === user.id)?.name ?? "Admin";
-        try {
-          await supabase.from("activity_logs").insert({
-            lead_id: id, user_id: user.id,
-            action: `${userName} deleted Revision ${revisionNumber}`,
-            details: revisionType || null,
-          });
-        } catch { /* non-fatal */ }
+        await logActivity({
+          leadId: id, userId: user.id, userRole: role,
+          action: `Revision ${revisionNumber} deleted`,
+          details: `${userName} deleted ${revisionType || "revision"}`,
+          entityType: "revisions",
+        });
       }
     },
     onSuccess: () => {
@@ -517,13 +541,12 @@ export default function LeadDetailPage() {
       if (count === 0) throw new Error("Could not delete task. Check Supabase RLS policies.");
       if (user && id) {
         const userName = employees.find((e) => e.user_id === user.id)?.name ?? "Admin";
-        try {
-          await supabase.from("activity_logs").insert({
-            lead_id: id, user_id: user.id,
-            action: `${userName} deleted task`,
-            details: taskDescription || null,
-          });
-        } catch { /* non-fatal */ }
+        await logActivity({
+          leadId: id, userId: user.id, userRole: role,
+          action: "Task deleted",
+          details: `${userName} deleted task: ${taskDescription || "—"}`,
+          entityType: "tasks",
+        });
       }
     },
     onSuccess: () => {
@@ -542,10 +565,18 @@ export default function LeadDetailPage() {
         .eq("id", noteId);
       if (error) throw error;
       if (count === 0) throw new Error("Could not delete note. Check Supabase RLS policies.");
+      if (user && id) {
+        await logActivity({
+          leadId: id, userId: user.id, userRole: role,
+          action: "Note deleted",
+          entityType: "lead_notes", entityId: noteId,
+        });
+      }
     },
     onSuccess: () => {
       toast({ title: "Note deleted" });
       queryClient.invalidateQueries({ queryKey: ["lead-notes", id] });
+      queryClient.invalidateQueries({ queryKey: ["activities", id] });
     },
     onError: (err: any) => toast({ title: "Error deleting note", description: err.message, variant: "destructive" }),
   });
@@ -581,14 +612,12 @@ export default function LeadDetailPage() {
       } catch { /* non-fatal */ }
 
       // Step 3 — Log activity
-      try {
-        await supabase.from("activity_logs").insert({
-          lead_id: id!,
-          user_id: user.id,
-          action: "Note created",
-          details: `${senderName} sent a note to ${receiverName}`,
-        });
-      } catch { /* non-fatal */ }
+      await logActivity({
+        leadId: id!, userId: user.id, userRole: role,
+        action: "Note added",
+        details: `${senderName} sent a note to ${receiverName}`,
+        entityType: "lead_notes",
+      });
 
       await supabase.from("leads").update({ last_activity_at: new Date().toISOString() }).eq("id", id!);
     },
@@ -649,6 +678,7 @@ export default function LeadDetailPage() {
       updates._logAction = `Changed status to ${leadInfoForm.status}`;
       updates.last_activity_at = new Date().toISOString();
     }
+
     updateLead.mutate(updates, {
       onSuccess: () => { setIsEditingLeadInfo(false); setIsSavingLeadInfo(false); },
       onError: () => setIsSavingLeadInfo(false),
@@ -803,7 +833,17 @@ export default function LeadDetailPage() {
             <Label className="text-muted-foreground text-xs">Status</Label>
             {isEditingLeadInfo ? (
               <>
-                <Select value={leadInfoForm.status} onValueChange={(v) => setLeadInfoForm({ ...leadInfoForm, status: v })}>
+                <Select
+                  value={leadInfoForm.status}
+                  onValueChange={(v) => {
+                    if (v === "Converted" && lead?.status !== "Converted") {
+                      setIsEditingLeadInfo(false);
+                      setConversionDialogOpen(true);
+                      return;
+                    }
+                    setLeadInfoForm({ ...leadInfoForm, status: v });
+                  }}
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {availableStatuses.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
@@ -876,6 +916,16 @@ export default function LeadDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Quotation Section */}
+      {(role === "admin" || role === "employee" || role === "execution") && !!lead && (
+        <Card>
+          <CardHeader><CardTitle>Quotation</CardTitle></CardHeader>
+          <CardContent>
+            <QuotationTab leadId={id!} lead={lead} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* ═══ ITINERARY ═══ */}
       <Card>
@@ -1046,11 +1096,11 @@ export default function LeadDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Notes & Tasks Tabs */}
+      {/* Notes, Tasks & Quotation Tabs */}
       <Card>
         <Tabs defaultValue="tasks">
           <CardHeader>
-            <TabsList className="flex justify-center bg-transparent p-0 h-auto gap-8 w-full">
+            <TabsList className="flex justify-center bg-transparent p-0 h-auto gap-8 w-full flex-wrap">
               <TabsTrigger
                 value="notes"
                 className="text-lg font-semibold px-0 py-1 bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none border-b-2 border-transparent data-[state=active]:border-primary rounded-none text-muted-foreground data-[state=active]:text-foreground"
@@ -1264,9 +1314,21 @@ export default function LeadDetailPage() {
                 </div>
               ))}
             </TabsContent>
+
+
           </CardContent>
         </Tabs>
       </Card>
+
+      {/* Trip Payments Tab — only when Converted */}
+      {lead.status === "Converted" && (role === "admin" || role === "employee" || role === "execution" || role === "accounts") && (
+        <Card>
+          <CardHeader><CardTitle>Trip Payments</CardTitle></CardHeader>
+          <CardContent>
+            <TripPaymentsTab leadId={id!} totalExpected={(lead as any).total_expected ?? null} />
+          </CardContent>
+        </Card>
+      )}
 
       {/* Activity Log */}
       <Card>
@@ -1324,6 +1386,20 @@ export default function LeadDetailPage() {
           })()}
         </CardContent>
       </Card>
+
+      {/* Conversion Dialog */}
+      <ConversionDialog
+        open={conversionDialogOpen}
+        onOpenChange={setConversionDialogOpen}
+        leadId={id!}
+        leadName={lead.name}
+        assignedEmployeeId={lead.assigned_employee_id}
+        onConverted={() => {
+          queryClient.invalidateQueries({ queryKey: ["lead", id] });
+          queryClient.invalidateQueries({ queryKey: ["leads"] });
+          queryClient.invalidateQueries({ queryKey: ["activities", id] });
+        }}
+      />
     </div>
   );
 }

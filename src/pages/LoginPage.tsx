@@ -10,14 +10,16 @@ import { Loader2 } from "lucide-react";
 const LoginPage = () => {
   const { signIn, user, loading: authLoading } = useAuth();
 
-  // If user is already authenticated, redirect to dashboard
-  if (!authLoading && user) {
-    return <Navigate to="/dashboard" replace />;
-  }
+  // All hooks must be declared before any conditional return (React rules of hooks)
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // If user is already authenticated, redirect to dashboard
+  if (!authLoading && user) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

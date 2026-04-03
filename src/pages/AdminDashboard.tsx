@@ -104,27 +104,38 @@ export default function AdminDashboard() {
   const [toDate, setToDate] = useState<Date>(new Date());
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
-  const { data: leads = [], isLoading: leadsLoading } = useQuery({
+  const { data: leads = [], isLoading: leadsLoading, isError: leadsError } = useQuery({
     queryKey: ["dashboard-leads", format(fromDate, "yyyy-MM-dd"), format(toDate, "yyyy-MM-dd")],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("leads")
         .select("id,status,tour_category,assigned_employee_id,name,lead_source,created_at")
         .gte("created_at", fromDate.toISOString())
         .lte("created_at", endOfDay(toDate).toISOString());
+      if (error) {
+        console.error("Dashboard leads query failed:", error.message);
+        throw error;
+      }
       return data ?? [];
     },
     enabled: !!user,
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
   });
 
   const { data: employees = [] } = useQuery({
     queryKey: ["employees"],
     queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("*");
+      const { data, error } = await supabase.from("profiles").select("*");
+      if (error) {
+        console.error("Employees query failed:", error.message);
+        throw error;
+      }
       return data ?? [];
     },
     enabled: !!user,
     staleTime: 5 * 60_000,
+    retry: 2,
   });
 
   // Stat card counts
@@ -277,6 +288,11 @@ export default function AdminDashboard() {
   return (
     <div className="space-y-6 animate-fade-in">
       <PageLoadingBar loading={leadsLoading} />
+      {leadsError && (
+        <div className="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/20 dark:text-red-400">
+          Dashboard data failed to load. Please refresh the page or check your connection.
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Dashboard</h1>

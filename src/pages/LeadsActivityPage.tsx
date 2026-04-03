@@ -45,10 +45,12 @@ export default function LeadsActivityPage() {
   const { data: employees = [] } = useQuery({
     queryKey: ["employees-list"],
     queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
+      const { data, error } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
     staleTime: 5 * 60_000,
   });
 
@@ -61,7 +63,8 @@ export default function LeadsActivityPage() {
         .select("*")
         .order("timestamp", { ascending: false });
       if (!isAdmin && user) logsQuery = logsQuery.eq("user_id", user.id);
-      const { data: logs } = await logsQuery;
+      const { data: logs, error: logsError } = await logsQuery;
+      if (logsError) throw logsError;
       if (!logs) return [];
 
       const leadIds = [...new Set(logs.map((l) => l.lead_id).filter(Boolean))];
@@ -177,13 +180,16 @@ export default function LeadsActivityPage() {
   const { data: inactiveLeads = [], isLoading: inactiveLoading } = useQuery({
     queryKey: ["inactive-leads-activity"],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("leads")
         .select("id, name, client_id, phone, itinerary_code, assigned_employee_id, last_activity_at")
         .eq("status", "On Progress");
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
+    retry: 2,
   });
 
   // ── Realtime subscription: refresh activity table on any insert ──

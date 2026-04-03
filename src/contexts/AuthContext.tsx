@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { useQueryClient } from "@tanstack/react-query";
 import type { User } from "@supabase/supabase-js";
 
-type Role = "admin" | "employee" | null;
+type Role = "admin" | "employee" | "execution" | "accounts" | "itinerary" | null;
 
 interface AuthContextType {
   user: User | null;
@@ -20,29 +21,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [role, setRole] = useState<Role>(null);
   const [profile, setProfile] = useState<{ name: string; email: string; whatsapp: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
-  const initialSessionHandled = useRef(false);
+  const queryClient = useQueryClient();
+
+  // Tracks which user ID we last kicked off a fetch for.
+  // Discards stale responses if a newer user has taken over.
+  const fetchedForRef = useRef<string | null>(null);
 
   const fetchUserData = async (userId: string) => {
+    fetchedForRef.current = userId;
     try {
       const [roleRes, profileRes] = await Promise.all([
         supabase.from("user_roles").select("role").eq("user_id", userId).maybeSingle(),
         supabase.from("profiles").select("name, email, whatsapp, is_active").eq("user_id", userId).maybeSingle(),
       ]);
 
-      if (roleRes.error) {
-        console.error("Error fetching user role:", roleRes.error.message);
-      }
-      if (profileRes.error) {
-        console.error("Error fetching user profile:", profileRes.error.message);
-      }
+      // Discard if a newer call has started
+      if (fetchedForRef.current !== userId) return;
+
+      if (roleRes.error) console.error("Role fetch error:", roleRes.error.message);
+      if (profileRes.error) console.error("Profile fetch error:", profileRes.error.message);
 
       if (profileRes.data && !profileRes.data.is_active) {
-        await supabase.auth.signOut();
+        supabase.auth.signOut({ scope: "local" }).catch(() => {});
         return;
       }
 
-      setRole(roleRes.data?.role ?? null);
-      setProfile(profileRes.data ? { name: profileRes.data.name, email: profileRes.data.email, whatsapp: profileRes.data.whatsapp } : null);
+      if (roleRes.data?.role) setRole(roleRes.data.role as Role);
+      if (profileRes.data) {
+        setProfile({
+          name: profileRes.data.name,
+          email: profileRes.data.email,
+          whatsapp: profileRes.data.whatsapp,
+        });
+      }
     } catch (err) {
       console.error("Unexpected error in fetchUserData:", err);
     }
@@ -51,42 +62,51 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     let mounted = true;
 
-    // 1. Handle the initial session on mount
+    // Step 1 — getSession() resolves the current session immediately from
+    // localStorage without a network round-trip. This is the fastest path
+    // on page reload and ensures loading=false even if the listener is slow.
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!mounted) return;
-
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      // Mark initial session as handled BEFORE the async fetchUserData call
-      // so that token-refresh events fired during fetchUserData aren't dropped.
-      initialSessionHandled.current = true;
-
       if (currentUser) {
         await fetchUserData(currentUser.id);
       }
-
       if (mounted) setLoading(false);
     });
 
-    // 2. Listen for subsequent auth state changes (sign-in, sign-out, token refresh)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      // Skip if the initial session hasn't been handled yet —
-      // getSession() above already covers the initial load.
-      if (!initialSessionHandled.current) return;
-      if (!mounted) return;
+    // Step 2 — onAuthStateChange handles subsequent events: SIGNED_IN after
+    // login, TOKEN_REFRESHED when the JWT auto-renews, SIGNED_OUT on logout.
+    // We skip the very first event (INITIAL_SESSION) because getSession()
+    // already handles it — processing it twice causes a double fetch.
+    let initialEventSkipped = false;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (!mounted) return;
 
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
+        // Skip the first INITIAL_SESSION — already handled by getSession() above
+        if (!initialEventSkipped) {
+          initialEventSkipped = true;
+          return;
+        }
 
-      if (currentUser) {
-        await fetchUserData(currentUser.id);
-      } else {
-        setRole(null);
-        setProfile(null);
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+
+        if (currentUser) {
+          await fetchUserData(currentUser.id);
+          if (mounted) setLoading(false);
+        } else {
+          // SIGNED_OUT fired by Supabase (token expiry, another tab, etc.)
+          // Do NOT reset fetchedForRef here — if the new user's SIGNED_IN already
+          // arrived first, resetting the ref would discard the in-flight fetch and
+          // leave role=null forever (spinner stuck). signOut() already clears it.
+          setRole(null);
+          setProfile(null);
+          if (mounted) setLoading(false);
+        }
       }
-
-      if (mounted) setLoading(false);
-    });
+    );
 
     return () => {
       mounted = false;
@@ -100,14 +120,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
-    try {
-      await supabase.auth.signOut();
-    } catch (err) {
-      console.error("Sign out error:", err);
-    }
+    // Clear all cached query data so the next user starts with a clean slate
+    queryClient.clear();
+    // Clear auth state immediately so the UI redirects without waiting for network
     setUser(null);
     setRole(null);
     setProfile(null);
+    fetchedForRef.current = null;
+    supabase.auth.signOut({ scope: "local" }).catch((err) => {
+      console.error("Sign out error:", err);
+    });
   };
 
   return (

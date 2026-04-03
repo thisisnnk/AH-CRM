@@ -39,52 +39,60 @@ export default function TasksPage() {
   const { data: employees = [] } = useQuery({
     queryKey: ["employees-list"],
     queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
+      const { data, error } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
     staleTime: 5 * 60_000,
   });
 
   const { data: leads = [] } = useQuery({
     queryKey: ["all-leads-select"],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("leads")
         .select("id, name, client_id, itinerary_code")
         .order("created_at", { ascending: false })
         .limit(200);
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
     staleTime: 60_000,
   });
 
   const { data: completedTasks = [], isLoading: completedLoading } = useQuery({
     queryKey: ["tasks-completed"],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("tasks")
         .select("*, leads(name)")
         .eq("status", "Completed")
         .order("completed_at", { ascending: false });
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
     refetchOnMount: "always",
   });
 
   const { data: incompleteTasks = [], isLoading: incompleteLoading } = useQuery({
     queryKey: ["tasks-incomplete"],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("tasks")
         .select("*, leads(name)")
         .neq("status", "Completed")
         .order("created_at", { ascending: false });
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
     refetchOnMount: "always",
   });
 

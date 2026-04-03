@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
@@ -12,6 +13,10 @@ import {
   Menu,
   Activity,
   CheckSquare,
+  Briefcase,
+  BookOpen,
+  Wallet,
+  Loader2,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import {
@@ -29,7 +34,6 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
 const adminNav = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Leads", url: "/leads", icon: Users },
   { title: "Leads Activity", url: "/leads-activity", icon: Activity },
   { title: "Contacts", url: "/contacts", icon: Contact },
@@ -39,22 +43,55 @@ const adminNav = [
 ];
 
 const employeeNav = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Leads", url: "/leads", icon: Users },
   { title: "Leads Activity", url: "/leads-activity", icon: Activity },
   { title: "Tasks", url: "/my-tasks", icon: CheckSquare },
   { title: "Notifications", url: "/notifications", icon: Bell },
 ];
 
+const executionNav = [
+  { title: "Leads", url: "/leads", icon: Users },
+  { title: "Execution", url: "/execution", icon: Briefcase },
+  { title: "Notifications", url: "/notifications", icon: Bell },
+];
+
+const accountsNav = [
+  { title: "General Ledger", url: "/general-ledger", icon: Wallet },
+  { title: "Notifications", url: "/notifications", icon: Bell },
+];
+
+const itineraryNav = [
+  { title: "Itineraries", url: "/itineraries", icon: BookOpen },
+  { title: "Notifications", url: "/notifications", icon: Bell },
+];
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  employee: "Employee",
+  execution: "Execution",
+  accounts: "Accounts",
+  itinerary: "Itinerary",
+};
+
 export function AppSidebar() {
   const { role, profile, signOut } = useAuth();
   const { state, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed";
   const navigate = useNavigate();
+  const [signingOut, setSigningOut] = useState(false);
 
-  const items = role === "admin" ? adminNav : employeeNav;
+  const navByRole: Record<string, typeof adminNav> = {
+    admin: adminNav,
+    employee: employeeNav,
+    execution: executionNav,
+    accounts: accountsNav,
+    itinerary: itineraryNav,
+  };
+  const items = role ? (navByRole[role] ?? employeeNav) : employeeNav;
 
   const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
     try {
       await signOut();
       navigate("/login");
@@ -62,6 +99,7 @@ export function AppSidebar() {
       console.error("Sign out error:", err);
       window.location.href = "/login";
     }
+    // No reset — navigating away
   };
 
   return (
@@ -116,16 +154,19 @@ export function AppSidebar() {
         {!collapsed && profile && (
           <div className="mb-3 px-1">
             <p className="text-sm font-medium text-sidebar-foreground">{profile.name}</p>
-            <p className="text-xs text-sidebar-muted">{role === "admin" ? "Admin" : "Employee"}</p>
+            <p className="text-xs text-sidebar-muted">{role ? ROLE_LABELS[role] ?? role : ""}</p>
           </div>
         )}
         <Button
           variant="ghost"
           onClick={handleSignOut}
+          disabled={signingOut}
           className="w-full justify-start text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground"
         >
-          <LogOut className="h-4 w-4 mr-2" />
-          {!collapsed && "Sign Out"}
+          {signingOut
+            ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            : <LogOut className="h-4 w-4 mr-2" />}
+          {!collapsed && (signingOut ? "Signing out..." : "Sign Out")}
         </Button>
       </SidebarFooter>
     </Sidebar>

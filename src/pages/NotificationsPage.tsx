@@ -19,15 +19,17 @@ export default function NotificationsPage() {
     queryKey: ["notifications", user?.id],
     queryFn: async () => {
       if (!user) return [];
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("notifications")
         .select("*")
         .eq("recipient_id", user.id)
         .eq("is_dismissed", false)
         .order("created_at", { ascending: false });
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
   });
 
   const markRead = useMutation({

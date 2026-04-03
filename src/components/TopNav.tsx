@@ -6,8 +6,19 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
+import type { RealtimeStatus } from "@/hooks/useRealtimeConnection";
 
-export function TopNav() {
+interface TopNavProps {
+  realtimeStatus: RealtimeStatus;
+}
+
+const STATUS_DOT: Record<RealtimeStatus, { className: string; title: string }> = {
+  connected:    { className: "bg-green-500",               title: "Live updates active" },
+  connecting:   { className: "bg-yellow-400 animate-pulse", title: "Connecting to live updates…" },
+  disconnected: { className: "bg-red-500",                 title: "Live updates disconnected — reconnecting" },
+};
+
+export function TopNav({ realtimeStatus }: TopNavProps) {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
 
@@ -27,6 +38,8 @@ export function TopNav() {
     refetchInterval: 30000,
   });
 
+  const dot = STATUS_DOT[realtimeStatus];
+
   return (
     <header className="h-14 border-b bg-card flex items-center justify-between px-4 sticky top-0 z-40">
       <div className="flex items-center gap-2">
@@ -45,6 +58,13 @@ export function TopNav() {
         <span className="text-sm text-muted-foreground hidden md:block">
           {profile?.name}
         </span>
+
+        {/* Realtime connection status indicator */}
+        <span
+          className={`h-2 w-2 rounded-full shrink-0 ${dot.className}`}
+          title={dot.title}
+        />
+
         <Button
           variant="ghost"
           size="icon"

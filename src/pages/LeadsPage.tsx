@@ -18,6 +18,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useNavigate } from "react-router-dom";
 import { sendNotification } from "@/utils/notificationHelper";
+import { ensureSession } from "@/utils/ensureSession";
 import { PhoneInput, isPhoneValid } from "@/components/PhoneInput";
 import { PageLoadingBar } from "@/components/PageLoadingBar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -31,6 +32,7 @@ export default function LeadsPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const isAdmin = role === "admin";
+  const canSeeAllLeads = role === "admin" || role === "execution" || role === "accounts";
 
   const [filter, setFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -80,7 +82,7 @@ export default function LeadsPage() {
         .lte("created_at", endOfDay(toDate).toISOString())
         .order("created_at", { ascending: false });
 
-      if (!isAdmin && user) {
+      if (!canSeeAllLeads && user) {
         query = query.eq("assigned_employee_id", user.id);
       }
 
@@ -92,7 +94,7 @@ export default function LeadsPage() {
       }
       return data ?? [];
     },
-    enabled: !!user,
+    enabled: !!user && role !== null,
     placeholderData: keepPreviousData,
     retry: 2,
   });
@@ -100,20 +102,24 @@ export default function LeadsPage() {
   const { data: employees = [] } = useQuery({
     queryKey: ["employees-list"],
     queryFn: async () => {
-      const { data } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
+      const { data, error } = await supabase.from("profiles").select("user_id, name").eq("is_active", true);
+      if (error) throw error;
       return data ?? [];
     },
     enabled: !!user,
+    retry: 2,
     staleTime: 5 * 60_000,
   });
 
   const { data: incomingLeads = [] } = useQuery({
     queryKey: ["incoming-leads"],
     queryFn: async () => {
-      const { data } = await supabase.from("Incoming_Leads").select("id, created_at, name, phone, email, destination, travel_date, duration, travelers_count, travel_type").order("created_at", { ascending: false });
+      const { data, error } = await supabase.from("Incoming_Leads").select("id, created_at, name, phone, email, destination, travel_date, duration, travelers_count, travel_type").order("created_at", { ascending: false });
+      if (error) throw error;
       return data ?? [];
     },
-    enabled: isAdmin,
+    enabled: !!user && role === "admin",
+    retry: 2,
   });
 
   // Generate client ID in AH-YYYY-MM-NNNN format
@@ -179,6 +185,7 @@ export default function LeadsPage() {
 
   const createLead = useMutation({
     mutationFn: async (): Promise<{ isExistingClient: boolean }> => {
+      await ensureSession();
       if (!user) throw new Error("Not authenticated");
       const normalizedPhone = normalizePhone(fullPhone);
 
@@ -450,16 +457,16 @@ export default function LeadsPage() {
     onError: (err: any) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
-  const statusKeys = isAdmin ? ["Open", "On Progress", "Converted", "Lost"] : ["Open", "Follow Up", "Converted", "Lost"];
+  const statusKeys = canSeeAllLeads ? ["Open", "On Progress", "Converted", "Lost"] : ["Open", "Follow Up", "Converted", "Lost"];
 
   const filteredLeads = leads.filter((l) => {
     if (filter !== "all") {
-      if (isAdmin && l.status !== filter) return false;
-      if (!isAdmin && l.badge_stage !== filter) return false;
+      if (canSeeAllLeads && l.status !== filter) return false;
+      if (!canSeeAllLeads && l.badge_stage !== filter) return false;
     }
     if (filterSources.length > 0 && !filterSources.includes(l.lead_source ?? "")) return false;
     if (filterAssignedTos.length > 0 && !filterAssignedTos.includes(l.assigned_employee_id ?? "")) return false;
-    if (filterStatuses.length > 0 && !filterStatuses.includes((isAdmin ? l.status : l.badge_stage) ?? "")) return false;
+    if (filterStatuses.length > 0 && !filterStatuses.includes((canSeeAllLeads ? l.status : l.badge_stage) ?? "")) return false;
     if (search.trim()) {
       const s = search.trim().toLowerCase();
       const matches =
@@ -476,12 +483,12 @@ export default function LeadsPage() {
 
   const leadsForSource = leads.filter((l) => {
     if (filterAssignedTos.length > 0 && !filterAssignedTos.includes(l.assigned_employee_id ?? "")) return false;
-    if (filterStatuses.length > 0 && !filterStatuses.includes((isAdmin ? l.status : l.badge_stage) ?? "")) return false;
+    if (filterStatuses.length > 0 && !filterStatuses.includes((canSeeAllLeads ? l.status : l.badge_stage) ?? "")) return false;
     return true;
   });
   const leadsForAssigned = leads.filter((l) => {
     if (filterSources.length > 0 && !filterSources.includes(l.lead_source ?? "")) return false;
-    if (filterStatuses.length > 0 && !filterStatuses.includes((isAdmin ? l.status : l.badge_stage) ?? "")) return false;
+    if (filterStatuses.length > 0 && !filterStatuses.includes((canSeeAllLeads ? l.status : l.badge_stage) ?? "")) return false;
     return true;
   });
   const leadsForStatus = leads.filter((l) => {
@@ -490,7 +497,7 @@ export default function LeadsPage() {
     return true;
   });
 
-  const badgeCounts = isAdmin
+  const badgeCounts = canSeeAllLeads
     ? {
       Open: leads.filter((l) => l.status === "Open").length,
       "On Progress": leads.filter((l) => l.status === "On Progress").length,
