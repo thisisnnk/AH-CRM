@@ -83,6 +83,33 @@ export type Database = {
         }
         Relationships: []
       }
+      quotation_slot_selections: {
+        Row: {
+          id: string
+          lead_id: string
+          quotation_id: string
+          slot_index: number
+          created_at: string | null
+          created_by: string | null
+        }
+        Insert: {
+          id?: string
+          lead_id: string
+          quotation_id: string
+          slot_index?: number
+          created_at?: string | null
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          lead_id?: string
+          quotation_id?: string
+          slot_index?: number
+          created_at?: string | null
+          created_by?: string | null
+        }
+        Relationships: []
+      }
       itineraries: {
         Row: {
           id: string

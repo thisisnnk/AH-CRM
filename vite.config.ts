@@ -11,6 +11,13 @@ export default defineConfig(({ mode }) => ({
     hmr: {
       overlay: false,
     },
+    proxy: {
+      "/api/worker": {
+        target: "https://ah-crm-upload-worker.thisisnnk.workers.dev",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/worker/, ""),
+      },
+    },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {

@@ -549,6 +549,39 @@ export function QuotationTab({ leadId, lead }: Props) {
     enabled: requestIds.length > 0,
   });
 
+  // ── Client's chosen slot selection ───────────────────────────────────────────
+
+  const { data: slotSelection } = useQuery({
+    queryKey: ["quotation-slot-selection", leadId],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("quotation_slot_selections")
+        .select("quotation_id, slot_index")
+        .eq("lead_id", leadId)
+        .maybeSingle();
+      return data ?? null;
+    },
+    enabled: !!leadId && !!user,
+  });
+
+  const saveSlotSelection = useMutation({
+    mutationFn: async ({ quotationId, slotIndex }: { quotationId: string; slotIndex: number }) => {
+      if (!user) throw new Error("Not authenticated");
+      const { error } = await supabase
+        .from("quotation_slot_selections")
+        .upsert(
+          { lead_id: leadId, quotation_id: quotationId, slot_index: slotIndex, created_by: user.id },
+          { onConflict: "lead_id" },
+        );
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      toast({ title: "Client's choice saved", description: "Execution team can now see the cost split." });
+      queryClient.invalidateQueries({ queryKey: ["quotation-slot-selection", leadId] });
+    },
+    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   // ── Dialog helpers ────────────────────────────────────────────────────────────
 
   function openNew() {
@@ -884,19 +917,58 @@ export function QuotationTab({ leadId, lead }: Props) {
                               // New slot format
                               <div className="divide-y divide-green-100 dark:divide-green-800">
                                 {(pricing.slots as { label: string; price: string }[]).map(
-                                  (slot, idx) => (
-                                    <div
-                                      key={idx}
-                                      className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0"
-                                    >
-                                      <span className="text-sm text-green-800 dark:text-green-300 leading-snug">
-                                        {slot.label || `Option ${idx + 1}`}
-                                      </span>
-                                      <span className="text-sm font-bold text-green-700 dark:text-green-400 shrink-0">
-                                        {slot.price}
-                                      </span>
-                                    </div>
-                                  )
+                                  (slot, idx) => {
+                                    const isChosen =
+                                      slotSelection?.quotation_id === q.id &&
+                                      slotSelection?.slot_index === idx;
+                                    return (
+                                      <div
+                                        key={idx}
+                                        className={cn(
+                                          "flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0",
+                                          isChosen && "bg-green-50 dark:bg-green-900/20 rounded-lg px-2 -mx-2",
+                                        )}
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          {isChosen && (
+                                            <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+                                          )}
+                                          <span className="text-sm text-green-800 dark:text-green-300 leading-snug">
+                                            {slot.label || `Option ${idx + 1}`}
+                                          </span>
+                                          {isChosen && (
+                                            <span className="text-xs bg-green-100 dark:bg-green-800 text-green-700 dark:text-green-300 px-1.5 py-0.5 rounded-full font-medium shrink-0">
+                                              Client&apos;s Choice
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <span className="text-sm font-bold text-green-700 dark:text-green-400">
+                                            {slot.price}
+                                          </span>
+                                          {canRequest && (
+                                            <Button
+                                              variant={isChosen ? "ghost" : "outline"}
+                                              size="sm"
+                                              className={cn(
+                                                "h-6 text-xs px-2",
+                                                isChosen && "text-green-600",
+                                              )}
+                                              onClick={() =>
+                                                saveSlotSelection.mutate({
+                                                  quotationId: q.id,
+                                                  slotIndex: idx,
+                                                })
+                                              }
+                                              disabled={saveSlotSelection.isPending}
+                                            >
+                                              {isChosen ? "✓ Selected" : "Client chose this"}
+                                            </Button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  }
                                 )}
                               </div>
                             ) : (

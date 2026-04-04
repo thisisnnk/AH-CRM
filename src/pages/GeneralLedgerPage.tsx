@@ -1,18 +1,16 @@
 import { useState, useMemo } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card as SummaryCard, CardContent as SummaryCardContent, CardHeader as SummaryCardHeader, CardTitle as SummaryCardTitle } from "@/components/ui/card";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
-import { CalendarIcon, TrendingUp, TrendingDown, IndianRupee, Search, Plus } from "lucide-react";
+import { CalendarIcon, TrendingUp, TrendingDown, IndianRupee, Search, Upload, Trash2, Download, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { queryKeys } from "@/lib/queryKeys";
 import { PageLoadingBar } from "@/components/PageLoadingBar";
@@ -46,19 +44,16 @@ interface TxRow {
 export default function GeneralLedgerPage() {
   const { user, role } = useAuth();
   const queryClient = useQueryClient();
-  const canUploadBill = role === "admin" || role === "accounts";
+  const isAccounts = role === "accounts";
+  const canUploadBill = isAccounts;
 
   const [fromDate, setFromDate] = useState<Date>(subDays(new Date(), 90));
   const [toDate, setToDate] = useState<Date>(new Date());
   const [fromOpen, setFromOpen] = useState(false);
   const [toOpen, setToOpen] = useState(false);
   const [search, setSearch] = useState("");
-
-  // Bill upload dialog state
-  const [billRow, setBillRow] = useState<TxRow | null>(null);
-  const [billFile, setBillFile] = useState<File | null>(null);
-  const [billUploading, setBillUploading] = useState(false);
-  const [billUrl, setBillUrl] = useState<string | null>(null);
+  // per-row bill upload tracking: key = `${tableName}-${id}`
+  const [billUploading, setBillUploading] = useState<Record<string, boolean>>({});
 
   const fromStr = format(startOfDay(fromDate), "yyyy-MM-dd'T'HH:mm:ss");
   const toStr = format(endOfDay(toDate), "yyyy-MM-dd'T'HH:mm:ss");
@@ -172,36 +167,50 @@ export default function GeneralLedgerPage() {
   const totalExpense = vendorTx.reduce((s, t) => s + t.amount, 0);
   const profit = totalRevenue - totalExpense;
 
-  // ── Bill upload mutation ──
-  const saveBill = useMutation({
-    mutationFn: async ({ row, url }: { row: TxRow; url: string }) => {
-      const table = row.tableName;
-      const { error } = await supabase.from(table).update({ bill_url: url } as any).eq("id", row.id);
-      if (error) throw error;
-    },
-    onSuccess: (_, { row }) => {
-      toast({ title: "Bill linked" });
-      setBillRow(null);
-      setBillFile(null);
-      setBillUrl(null);
-      if (row.tableName === "client_transactions") {
-        queryClient.invalidateQueries({ queryKey: queryKeys.allClientTransactions(fromStr, toStr) });
-      } else {
-        queryClient.invalidateQueries({ queryKey: queryKeys.allVendorTransactions(fromStr, toStr) });
-      }
-    },
-    onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
-  });
+  const invalidateTx = (tableName: "client_transactions" | "vendor_transactions") => {
+    if (tableName === "client_transactions") {
+      queryClient.invalidateQueries({ queryKey: queryKeys.allClientTransactions(fromStr, toStr) });
+    } else {
+      queryClient.invalidateQueries({ queryKey: queryKeys.allVendorTransactions(fromStr, toStr) });
+    }
+  };
 
-  const handleBillUpload = async (file: File) => {
-    setBillUploading(true);
+  const uploadBill = async (row: TxRow, file: File) => {
+    const key = `${row.tableName}-${row.id}`;
+    setBillUploading((p) => ({ ...p, [key]: true }));
     try {
       const url = await uploadToR2(file, "bills", () => {});
-      setBillUrl(url);
+      const rpc = row.tableName === "client_transactions" ? "update_client_tx_bill" : "update_vendor_tx_bill";
+      const { error } = await supabase.rpc(rpc, { p_id: row.id, p_url: url });
+      if (error) throw error;
+      toast({ title: "Bill uploaded" });
+      invalidateTx(row.tableName);
     } catch (err: any) {
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
     }
-    setBillUploading(false);
+    setBillUploading((p) => ({ ...p, [key]: false }));
+  };
+
+  const removeBill = async (row: TxRow) => {
+    const rpc = row.tableName === "client_transactions" ? "remove_client_tx_bill" : "remove_vendor_tx_bill";
+    const { error } = await supabase.rpc(rpc, { p_id: row.id });
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); return; }
+    toast({ title: "Bill removed" });
+    invalidateTx(row.tableName);
+  };
+
+  const downloadFile = async (url: string, filename: string) => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      window.open(url, "_blank");
+    }
   };
 
   // ── Ledger table ──
@@ -225,7 +234,6 @@ export default function GeneralLedgerPage() {
                   <th className="text-right px-4 py-3 text-xs font-medium text-muted-foreground">Amount</th>
                   <th className="px-4 py-3 text-xs font-medium text-muted-foreground hidden sm:table-cell">Proof</th>
                   <th className="px-4 py-3 text-xs font-medium text-muted-foreground hidden sm:table-cell">Bill</th>
-                  {canUploadBill && <th className="px-4 py-3 text-xs font-medium text-muted-foreground"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -251,27 +259,43 @@ export default function GeneralLedgerPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 hidden sm:table-cell">
-                      {row.bill_url ? (
-                        <a href={row.bill_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline">
-                          View
-                        </a>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
+                      {(() => {
+                        const key = `${row.tableName}-${row.id}`;
+                        if (canUploadBill) {
+                          // Accounts: upload / view / delete inline
+                          if (billUploading[key]) {
+                            return <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> Uploading…</span>;
+                          }
+                          return (
+                            <div className="flex items-center gap-2">
+                              {row.bill_url && (
+                                <>
+                                  <a href={row.bill_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline">View</a>
+                                  <button onClick={() => removeBill(row)} className="text-muted-foreground hover:text-destructive transition-colors" title="Delete bill">
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </>
+                              )}
+                              <label className="cursor-pointer inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary">
+                                <Upload className="h-3.5 w-3.5" />
+                                <span>{row.bill_url ? "Replace" : "Upload"}</span>
+                                <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadBill(row, f); }} />
+                              </label>
+                            </div>
+                          );
+                        }
+                        // Admin / Employee / Execution: view + download only
+                        if (!row.bill_url) return <span className="text-xs text-muted-foreground">—</span>;
+                        return (
+                          <div className="flex items-center gap-2">
+                            <a href={row.bill_url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline">View</a>
+                            <button onClick={() => downloadFile(row.bill_url!, `bill-${row.title}`)} className="text-muted-foreground hover:text-primary transition-colors" title="Download bill">
+                              <Download className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </td>
-                    {canUploadBill && (
-                      <td className="px-4 py-3">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 w-6 p-0"
-                          title="Upload bill"
-                          onClick={() => { setBillRow(row); setBillFile(null); setBillUrl(row.bill_url); }}
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </Button>
-                      </td>
-                    )}
                   </tr>
                 ))}
               </tbody>
@@ -389,62 +413,6 @@ export default function GeneralLedgerPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Bill Upload Dialog */}
-      <Dialog open={!!billRow} onOpenChange={(o) => { if (!o) { setBillRow(null); setBillFile(null); setBillUrl(null); } }}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
-          <DialogHeader>
-            <DialogTitle>Upload Bill</DialogTitle>
-          </DialogHeader>
-          {billRow && (
-            <div className="space-y-4 pt-2">
-              <div className="rounded-lg border p-3 space-y-1 bg-muted/20">
-                <p className="text-sm font-medium">{billRow.title}</p>
-                <p className="text-xs text-muted-foreground">{billRow.leadName} · ₹{fmt(billRow.amount)}</p>
-              </div>
-
-              {billRow.bill_url && !billUrl && (
-                <p className="text-xs text-muted-foreground">
-                  Current:{" "}
-                  <a href={billRow.bill_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                    View existing bill
-                  </a>
-                </p>
-              )}
-
-              <div>
-                <Label>Bill / Invoice</Label>
-                <div className="mt-1 flex items-center gap-2">
-                  <Input
-                    type="file"
-                    accept="image/*,application/pdf"
-                    className="flex-1 text-xs"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) { setBillFile(f); handleBillUpload(f); }
-                    }}
-                  />
-                  {billUploading && <span className="text-xs text-muted-foreground">Uploading...</span>}
-                </div>
-                {billUrl && !billUploading && (
-                  <p className="text-xs text-green-600 mt-1">
-                    <a href={billUrl} target="_blank" rel="noopener noreferrer" className="hover:underline">
-                      File ready — click to preview
-                    </a>
-                  </p>
-                )}
-              </div>
-
-              <Button
-                className="w-full"
-                disabled={!billUrl || billUploading || saveBill.isPending}
-                onClick={() => { if (billRow && billUrl) saveBill.mutate({ row: billRow, url: billUrl }); }}
-              >
-                {saveBill.isPending ? "Saving..." : "Save Bill"}
-              </Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -1,4 +1,8 @@
-const WORKER_URL = import.meta.env.VITE_CLOUDFLARE_WORKER_URL;
+// In dev, route through Vite's proxy (/api/worker → worker URL) to bypass CORS.
+// In production, hit the worker directly.
+const WORKER_URL = import.meta.env.DEV
+  ? "/api/worker"
+  : import.meta.env.VITE_CLOUDFLARE_WORKER_URL;
 
 // Timeout helpers
 const withTimeout = <T>(promise: Promise<T>, ms: number, label: string): Promise<T> => {
@@ -24,9 +28,7 @@ export async function uploadToR2(
   if (!WORKER_URL) {
     throw new Error("Upload service is not configured. Contact admin.");
   }
-  const url = new URL(`${WORKER_URL}/upload`);
-  url.searchParams.set("folder", folder);
-  url.searchParams.set("filename", file.name);
+  const urlStr = `${WORKER_URL}/upload?folder=${encodeURIComponent(folder)}&filename=${encodeURIComponent(file.name)}`;
 
   onProgress(0);
 
@@ -46,7 +48,7 @@ export async function uploadToR2(
 
   let response: Response;
   try {
-    response = await fetch(url.toString(), {
+    response = await fetch(urlStr, {
       method: "POST",
       headers: {
         "Content-Type": file.type || "application/octet-stream",

@@ -20,6 +20,7 @@ import ExecutionPage from "./pages/ExecutionPage";
 import ExecutionRespondPage from "./pages/ExecutionRespondPage";
 import ItinerariesPage from "./pages/ItinerariesPage";
 import GeneralLedgerPage from "./pages/GeneralLedgerPage";
+import TripPaymentsPage from "./pages/TripPaymentsPage";
 import { ProtectedLayout, AdminRoute, ExecutionRoute, ItineraryRoute, AccountsRoute } from "./components/ProtectedLayout";
 
 const queryClient = new QueryClient({
@@ -77,6 +78,7 @@ const App = () => (
               <Route element={<ExecutionRoute />}>
                 <Route path="/execution" element={<ExecutionPage />} />
                 <Route path="/execution/respond/:requestId" element={<ExecutionRespondPage />} />
+                <Route path="/trip-payments" element={<TripPaymentsPage />} />
               </Route>
 
               {/* Itinerary team */}

@@ -1337,28 +1337,46 @@ export default function LeadDetailPage() {
         <CardHeader><CardTitle>Activity Log</CardTitle></CardHeader>
         <CardContent>
           {(() => {
-            const relevantActivities = activities.filter((a) =>
-              a.action === "Submitted itinerary" ||
-              a.action === "Created task" ||
-              a.action === "Task proof uploaded" ||
-              a.action === "Note created" ||
-              (a.action ?? "").startsWith("Added Revision") ||
-              (a.action ?? "").startsWith("Changed status to") ||
-              (a.action ?? "").includes("deleted Revision") ||
-              (a.action ?? "").includes("deleted task")
-            );
+            const relevantActivities = activities;
             return relevantActivities.length === 0 ? (
             <p className="text-sm text-muted-foreground">No activity recorded yet</p>
           ) : (
             <div className="space-y-2">
               {relevantActivities.map((a) => {
-                // Resolve proof URL: prefer dedicated proof_url column, fall back to file_url/upload_url,
-                // then fall back to details if it looks like a URL (http:// or https://)
-                const proofUrl: string | null =
-                  a.proof_url ||
-                  (a as any).file_url ||
-                  (a as any).upload_url ||
-                  (a.details?.startsWith("http") ? a.details : null);
+                // Resolve proof URL: prefer proof_url column → legacy columns → details URL →
+                // cross-reference revisions table (covers old entries before proof_url column existed)
+                const proofUrl: string | null = (() => {
+                  // 1. Dedicated proof_url column (new entries)
+                  if (a.proof_url) return a.proof_url;
+                  // 2. Legacy column names
+                  if ((a as any).file_url) return (a as any).file_url;
+                  if ((a as any).upload_url) return (a as any).upload_url;
+                  // 3. Details that is itself a URL
+                  if (a.details?.startsWith("http")) return a.details;
+                  // 4. Cross-reference revisions table — covers all old "Revision N added" entries
+                  const revMatch = a.action?.match(/Revision (\d+) added/i);
+                  if (revMatch) {
+                    const revNum = parseInt(revMatch[1]);
+                    const rev = revisions.find((r) => r.revision_number === revNum);
+                    if (rev) return rev.itinerary_link || rev.call_recording_url || null;
+                  }
+                  // 5. "Itinerary submitted" → find the earliest itinerary revision
+                  if (a.action?.toLowerCase().includes("itinerary submitted")) {
+                    const rev = revisions.find((r) => r.itinerary_link);
+                    if (rev) return rev.itinerary_link || null;
+                  }
+                  // 6. "Task proof submitted" → look up task by entity_id, then fall back to any completed task
+                  if (a.action?.toLowerCase().includes("task proof")) {
+                    if (a.entity_id) {
+                      const task = tasks.find((t) => t.id === a.entity_id);
+                      if (task?.proof_url) return task.proof_url;
+                    }
+                    // No entity_id (old entries): if only one task has a proof, use it
+                    const proofTasks = tasks.filter((t) => t.proof_url);
+                    if (proofTasks.length === 1) return proofTasks[0].proof_url ?? null;
+                  }
+                  return null;
+                })();
                 // Show description text only when details is not itself a URL
                 const descriptionText =
                   a.details && !a.details.startsWith("http") ? a.details : null;

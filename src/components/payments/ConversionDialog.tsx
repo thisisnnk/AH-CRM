@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -12,11 +12,18 @@ import { toast } from "@/hooks/use-toast";
 import { sendNotification } from "@/utils/notificationHelper";
 import { uploadToR2 } from "@/utils/uploadToR2";
 import { logActivity } from "@/utils/activityLogger";
-import { IndianRupee, ExternalLink } from "lucide-react";
+import { IndianRupee, ExternalLink, CheckCircle2 } from "lucide-react";
 import { queryKeys } from "@/lib/queryKeys";
 
 const PAYMENT_MODES = ["Cash", "UPI", "Bank Transfer", "Card", "Cheque", "Other"] as const;
 const COST_CATEGORY_NAMES = ["Transport", "Accommodation", "Food", "Activities", "Extras"] as const;
+
+interface PricingSlot {
+  label: string;
+  price: string;
+  breakdown: { title: string; qty: string; rate: string }[];
+  margin: string;
+}
 
 interface Props {
   open: boolean;
@@ -25,6 +32,10 @@ interface Props {
   leadName: string;
   assignedEmployeeId?: string | null;
   onConverted: () => void;
+}
+
+function parseSlotPrice(price: string): number {
+  return parseFloat(price.replace(/[₹,\s]/g, "")) || 0;
 }
 
 export function ConversionDialog({ open, onOpenChange, leadId, leadName, assignedEmployeeId, onConverted }: Props) {
@@ -38,6 +49,35 @@ export function ConversionDialog({ open, onOpenChange, leadId, leadName, assigne
   const [proofFile, setProofFile] = useState<File | null>(null);
   const [proofUrl, setProofUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [selectedQuotationId, setSelectedQuotationId] = useState<string | null>(null);
+  const [selectedSlotIndex, setSelectedSlotIndex] = useState<number | null>(null);
+
+  // Fetch latest responded quotation for this lead
+  const { data: latestQuotation } = useQuery({
+    queryKey: ["conversion-quotation", leadId],
+    queryFn: async () => {
+      const { data: requests } = await supabase
+        .from("quotation_requests")
+        .select("id")
+        .eq("lead_id", leadId)
+        .eq("status", "responded")
+        .order("version", { ascending: false })
+        .limit(1);
+      if (!requests || requests.length === 0) return null;
+
+      const { data: quotation } = await supabase
+        .from("quotations")
+        .select("id, pricing_data")
+        .eq("request_id", requests[0].id)
+        .order("version", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return quotation ?? null;
+    },
+    enabled: !!leadId && open,
+  });
+
+  const slots: PricingSlot[] = (latestQuotation?.pricing_data as any)?.slots ?? [];
 
   const handleUpload = async (file: File) => {
     setUploading(true);
@@ -48,6 +88,13 @@ export function ConversionDialog({ open, onOpenChange, leadId, leadName, assigne
       toast({ title: "Upload failed", description: err.message, variant: "destructive" });
     }
     setUploading(false);
+  };
+
+  const handleSelectSlot = (quotationId: string, slotIdx: number, slot: PricingSlot) => {
+    setSelectedQuotationId(quotationId);
+    setSelectedSlotIndex(slotIdx);
+    const price = parseSlotPrice(slot.price);
+    if (price > 0) setTotalExpected(String(price));
   };
 
   const convert = useMutation({
@@ -82,7 +129,20 @@ export function ConversionDialog({ open, onOpenChange, leadId, leadName, assigne
       }));
       await supabase.from("cost_categories").upsert(categories, { onConflict: "lead_id,category_name" });
 
-      // 4. Log activity
+      // 4. Save selected quotation slot (if chosen)
+      if (selectedQuotationId !== null && selectedSlotIndex !== null) {
+        await supabase.from("quotation_slot_selections").upsert(
+          {
+            lead_id: leadId,
+            quotation_id: selectedQuotationId,
+            slot_index: selectedSlotIndex,
+            created_by: user.id,
+          },
+          { onConflict: "lead_id" },
+        );
+      }
+
+      // 5. Log activity
       await logActivity({
         leadId,
         userId: user.id,
@@ -93,7 +153,7 @@ export function ConversionDialog({ open, onOpenChange, leadId, leadName, assigne
         entityId: leadId,
       });
 
-      // 5. Notify execution team
+      // 6. Notify execution team
       const { data: executionUsers } = await supabase
         .from("user_roles")
         .select("user_id")
@@ -114,20 +174,21 @@ export function ConversionDialog({ open, onOpenChange, leadId, leadName, assigne
       queryClient.invalidateQueries({ queryKey: queryKeys.costCategories(leadId) });
       onOpenChange(false);
       onConverted();
-      // Reset form
       setTotalExpected("");
       setTitle("Advance Payment");
       setAmount("");
       setPaymentMode("UPI");
       setProofFile(null);
       setProofUrl(null);
+      setSelectedQuotationId(null);
+      setSelectedSlotIndex(null);
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-2rem)] max-w-md">
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Convert Lead</DialogTitle>
           <DialogDescription>
@@ -135,6 +196,53 @@ export function ConversionDialog({ open, onOpenChange, leadId, leadName, assigne
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 pt-2">
+
+          {/* ── Quotation slot selection ── */}
+          {slots.length > 0 && (
+            <>
+              <div>
+                <p className="text-sm font-medium mb-2">Client's Chosen Price Option</p>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Select the option the client agreed to — it will auto-fill the expected amount and be visible to the execution team.
+                </p>
+                <div className="space-y-2">
+                  {slots.map((slot, idx) => {
+                    const isSelected = selectedQuotationId === latestQuotation?.id && selectedSlotIndex === idx;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => handleSelectSlot(latestQuotation!.id, idx, slot)}
+                        className={`w-full text-left rounded-lg border px-4 py-3 transition-colors ${
+                          isSelected
+                            ? "border-primary bg-primary/5"
+                            : "border-border hover:border-primary/50 hover:bg-muted/30"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-sm">
+                            {slot.label || `Option ${idx + 1}`}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-sm text-green-600">{slot.price}</span>
+                            {isSelected && <CheckCircle2 className="h-4 w-4 text-primary" />}
+                          </div>
+                        </div>
+                        {slot.breakdown.length > 0 && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {slot.breakdown.length} cost item{slot.breakdown.length !== 1 ? "s" : ""}
+                            {slot.margin ? ` + ₹${Number(slot.margin).toLocaleString("en-IN")} margin` : ""}
+                          </p>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <Separator />
+            </>
+          )}
+
           {/* Total Expected */}
           <div>
             <Label className="font-medium">Total Expected Revenue *</Label>

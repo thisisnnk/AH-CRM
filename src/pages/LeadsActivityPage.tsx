@@ -13,12 +13,20 @@ import { Filter, Search, CalendarIcon, Clock, ExternalLink } from "lucide-react"
 import { PageLoadingBar } from "@/components/PageLoadingBar";
 
 const isRelevantAction = (action: string) =>
+  // Legacy action names
   action === "Submitted itinerary" ||
   action === "Created task" ||
   action === "Task proof uploaded" ||
   action === "Note created" ||
   action.startsWith("Added Revision") ||
-  action.startsWith("Changed status to");
+  action.startsWith("Changed status to") ||
+  // Current action names (from logActivity())
+  action === "Itinerary submitted" ||
+  action === "Task created" ||
+  action === "Task proof submitted" ||
+  action === "Note added" ||
+  /^Revision \d+ added/i.test(action) ||
+  action.startsWith("Status changed to");
 
 export default function LeadsActivityPage() {
   const { role, user } = useAuth();
@@ -82,7 +90,7 @@ export default function LeadsActivityPage() {
           .not("proof_url", "is", null),
         supabase
           .from("revisions")
-          .select("lead_id, created_by, itinerary_link, call_recording_url, date_sent, created_at")
+          .select("lead_id, revision_number, created_by, itinerary_link, call_recording_url, date_sent, created_at")
           .in("lead_id", leadIds),
       ]);
 
@@ -97,7 +105,11 @@ export default function LeadsActivityPage() {
 
           let proofUrl: string | null = null;
 
-          if (a.action === "Task proof uploaded") {
+          // Always prefer the dedicated proof_url column (new entries)
+          if (a.proof_url) {
+            proofUrl = a.proof_url;
+          } else if (a.action === "Task proof uploaded" || a.action === "Task proof submitted") {
+            // Legacy: details was sometimes the URL itself
             if (a.details?.startsWith("https://")) {
               proofUrl = a.details;
             } else {
@@ -116,7 +128,7 @@ export default function LeadsActivityPage() {
                 proofUrl = closest.proof_url;
               }
             }
-          } else if (a.action === "Submitted itinerary") {
+          } else if (a.action === "Submitted itinerary" || a.action === "Itinerary submitted") {
             if (a.details?.startsWith("https://")) {
               proofUrl = a.details;
             } else {
@@ -128,29 +140,41 @@ export default function LeadsActivityPage() {
               } else if (candidates.length > 1 && a.timestamp) {
                 const actTs = new Date(a.timestamp).getTime();
                 const closest = candidates.reduce((best, r) => {
-                  const rDiff = Math.abs(new Date(r.date_sent ?? 0).getTime() - actTs);
-                  const bDiff = Math.abs(new Date(best.date_sent ?? 0).getTime() - actTs);
+                  const rDiff = Math.abs(new Date(r.date_sent ?? r.created_at ?? 0).getTime() - actTs);
+                  const bDiff = Math.abs(new Date(best.date_sent ?? best.created_at ?? 0).getTime() - actTs);
                   return rDiff < bDiff ? r : best;
                 });
                 proofUrl = closest.itinerary_link;
               }
             }
-          } else if ((a.action ?? "").startsWith("Added Revision")) {
-            const actTs = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-            const candidates = revisionList.filter(
-              (r) => r.lead_id === a.lead_id && r.created_by === a.user_id &&
-                ((r.itinerary_link && r.itinerary_link.startsWith("https://")) ||
-                 (r.call_recording_url && r.call_recording_url.startsWith("https://")))
-            );
-            if (candidates.length === 1) {
-              proofUrl = candidates[0].itinerary_link || candidates[0].call_recording_url || null;
-            } else if (candidates.length > 1 && actTs) {
-              const closest = candidates.reduce((best, r) => {
-                const rDiff = Math.abs(new Date((r as any).created_at ?? r.date_sent ?? 0).getTime() - actTs);
-                const bDiff = Math.abs(new Date((best as any).created_at ?? best.date_sent ?? 0).getTime() - actTs);
-                return rDiff < bDiff ? r : best;
-              });
-              proofUrl = closest.itinerary_link || closest.call_recording_url || null;
+          } else if ((a.action ?? "").startsWith("Added Revision") || /^Revision \d+ added/i.test(a.action ?? "")) {
+            // New format: "Revision N added — type" → match by revision_number first
+            const revNumMatch = (a.action ?? "").match(/Revision (\d+) added/i);
+            if (revNumMatch) {
+              const revNum = parseInt(revNumMatch[1]);
+              const rev = revisionList.find(
+                (r) => r.lead_id === a.lead_id && (r as any).revision_number === revNum
+              );
+              if (rev) proofUrl = rev.itinerary_link || rev.call_recording_url || null;
+            }
+            // Fallback: timestamp-based matching (covers legacy "Added Revision" entries)
+            if (!proofUrl) {
+              const actTs = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+              const candidates = revisionList.filter(
+                (r) => r.lead_id === a.lead_id && r.created_by === a.user_id &&
+                  ((r.itinerary_link && r.itinerary_link.startsWith("https://")) ||
+                   (r.call_recording_url && r.call_recording_url.startsWith("https://")))
+              );
+              if (candidates.length === 1) {
+                proofUrl = candidates[0].itinerary_link || candidates[0].call_recording_url || null;
+              } else if (candidates.length > 1 && actTs) {
+                const closest = candidates.reduce((best, r) => {
+                  const rDiff = Math.abs(new Date((r as any).created_at ?? r.date_sent ?? 0).getTime() - actTs);
+                  const bDiff = Math.abs(new Date((best as any).created_at ?? best.date_sent ?? 0).getTime() - actTs);
+                  return rDiff < bDiff ? r : best;
+                });
+                proofUrl = closest.itinerary_link || closest.call_recording_url || null;
+              }
             }
           }
 

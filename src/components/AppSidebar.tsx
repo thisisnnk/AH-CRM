@@ -16,6 +16,7 @@ import {
   Briefcase,
   BookOpen,
   Wallet,
+  CreditCard,
   Loader2,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
@@ -54,6 +55,7 @@ const employeeNav = [
 const executionNav = [
   { title: "Leads", url: "/leads", icon: Users },
   { title: "Execution", url: "/execution", icon: Briefcase },
+  { title: "Trip Payments", url: "/trip-payments", icon: CreditCard },
   { title: "Notifications", url: "/notifications", icon: Bell },
 ];
 
